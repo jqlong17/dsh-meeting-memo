@@ -1,0 +1,5 @@
+# DeepSeek Harness 插件入口：Host 半身（右侧栏 RPC + Agent 工具）。
+# 浏览器半身由 package.json 的 dsh.client 声明，随 Host 包一起加载。
+- insert:
+    - id: dsh-meeting-minutes
+      name: dsh-meeting-minutes
