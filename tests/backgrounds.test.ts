@@ -103,7 +103,7 @@ test('generation attaches the selected cards and records them on the entry', asy
         yield {
           type: 'text-delta',
           text: JSON.stringify({
-            meetings: [{ start: '09:00', end: '09:10', topic: '行为权限', summary: '确认权限边界。', points: ['行为是可编排单元'], todos: [] }],
+            meetings: [{ start: '09:00', end: '09:10', topic: '行为权限', content: '> 💡 **本场背景与目标**\n> 确认权限边界。\n\n### 核心结论\n- **行为可编排**：行为是可编排单元' }],
           }),
         }
         yield { type: 'finish', reason: { kind: 'stop' } }
@@ -121,10 +121,10 @@ test('generation attaches the selected cards and records them on the entry', asy
     const result = await service.generateMinutes(DAY, '09:00', '09:10', undefined, [card.id])
     assert.match(captured, /本体平台/)
     assert.match(captured, /行为是可编排的动作单元/)
-    assert.deepEqual(result.sessions[0].backgrounds, ['本体平台'])
-    assert.deepEqual(readDoc(home, DAY).sessions[0].backgrounds, ['本体平台'])
+    assert.match(result.sessions[0].content, /参考背景：本体平台/)
+    assert.match(readDoc(home, DAY).sessions[0].content, /参考背景：本体平台/)
     const markdown = readFileSync(path.join(home, 'minutes', `${DAY}.md`), 'utf8')
-    assert.match(markdown, /参考背景.*本体平台/)
+    assert.match(markdown, /参考背景：本体平台/)
   } finally {
     rmSync(root, { recursive: true, force: true })
     rmSync(home, { recursive: true, force: true })

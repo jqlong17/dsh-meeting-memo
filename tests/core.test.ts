@@ -8,6 +8,7 @@ import { readDay, hourlySummary, sliceRange } from '../src/lifelog.ts'
 import { renderMarkdown, readDoc, writeDoc } from '../src/minutes.ts'
 import { clipText, hasSwitchMarker, parseMeetings } from '../src/ai.ts'
 import { buildIndexCopy, compressLineRanges } from '../src/copy-index.ts'
+import { parseFootprint } from '../src/memory-sample.ts'
 
 function dayFixture(rows: { activity: string[]; snippets: string[] }): { root: string; day: string; cleanup: () => void } {
   const root = mkdtempSync(path.join(os.tmpdir(), 'mm-test-'))
@@ -97,27 +98,26 @@ test('AI reply parsing keeps one meeting unless the transcript switches', () => 
       start: '09:00',
       end: '09:20',
       topic: '可执行与可编辑权限',
-      summary: '确认行为测试里的权限边界。',
-      points: ['可执行与可编辑是两套权限', '新建行为时也要判断可执行'],
-      todos: ['补一个只读角色的用例'],
+      content: '> 💡 **本场背景与目标**\n> 确认行为测试里的权限边界。\n\n### 核心结论\n- 可执行与可编辑是两套权限\n- 新建行为时也要判断可执行\n\n### TODO\n- [ ] 补一个只读角色的用例',
     }],
   }) + '\n```'
   const one = parseMeetings(reply, { start: 540, end: 560 }, false)
   assert.equal(one.length, 1)
   assert.equal(one[0].start, 540)
   assert.equal(one[0].end, 560)
-  assert.equal(one[0].todos.length, 1)
+  assert.match(one[0].content, /补一个只读角色的用例/)
 
   const splitReply = JSON.stringify({
     meetings: [
-      { start: '09:00', end: '09:10', topic: '权限', points: ['可执行与可编辑分开'] },
-      { start: '09:10', end: '09:20', topic: '测试', points: ['补只读用例'] },
+      { start: '09:00', end: '09:10', topic: '权限', content: '> 权限边界' },
+      { start: '09:10', end: '09:20', topic: '测试', content: '> 补用例' },
     ],
   })
   const merged = parseMeetings(splitReply, { start: 540, end: 560 }, false)
   assert.equal(merged.length, 1)
   assert.equal(merged[0].topic, '权限')
-  assert.deepEqual(merged[0].points, ['可执行与可编辑分开', '补只读用例'])
+  assert.match(merged[0].content, /权限边界/)
+  assert.match(merged[0].content, /补用例/)
 
   const split = parseMeetings(splitReply, { start: 540, end: 560 }, true)
   assert.equal(split.length, 2)
@@ -148,9 +148,7 @@ test('minutes round-trip to JSON and Markdown', () => {
         start: 540,
         end: 560,
         topic: '插件面板',
-        summary: '确认时间轴与转写联动。',
-        points: ['时间轴用组件实现', '选区默认两小时'],
-        todos: ['补暗色模式截图'],
+        content: '> 确认时间轴与转写联动。\n\n### 核心结论\n- 时间轴用组件实现\n- 选区默认两小时\n\n### TODO\n- [ ] 补暗色模式截图',
         source: 'agent',
         updatedAt: '',
       }],
@@ -161,7 +159,7 @@ test('minutes round-trip to JSON and Markdown', () => {
     assert.match(md, /- \[ \] 补暗色模式截图/)
     const read = readDoc(home, '2026-11-10')
     assert.equal(read.sessions[0].topic, '插件面板')
-    assert.deepEqual(read.sessions[0].todos, ['补暗色模式截图'])
+    assert.match(read.sessions[0].content, /补暗色模式截图/)
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
@@ -182,10 +180,10 @@ test('copy index points at the exact snippets.jsonl lines', () => {
     filtered: false,
   })
   assert.match(text, /文件: \/Users\/me\/Documents\/notta生活日志\/2026-11-10\/snippets.jsonl/)
-  assert.match(text, /行号: 1203-1204, 1210/)
+  assert.match(text, /要读的行: 1203-1204, 1210/)
   assert.match(text, /选区: 2026-11-10 17:40:00 – 18:52:00/)
-  assert.match(text, /数据: 2026-11-10 18:23:15 – 18:41:00/)
-  assert.match(text, /片段: 3/)
+  assert.match(text, /这些行实际覆盖: 2026-11-10 18:23:15 – 18:41:00/)
+  assert.match(text, /片段数: 3/)
 
   const filtered = buildIndexCopy({
     day: '2026-11-10',
@@ -195,5 +193,32 @@ test('copy index points at the exact snippets.jsonl lines', () => {
     trackLabel: '麦克风',
     filtered: true,
   })
-  assert.match(filtered, /轨道: 麦克风（行号只含该轨道）/)
+  assert.match(filtered, /轨道筛选: 麦克风（行号只含该轨道）/)
+  assert.match(filtered, /背景资料: 无/)
+  const withBackground = buildIndexCopy({
+    day: '2026-11-10',
+    file: '/tmp/snippets.jsonl',
+    segments: [{ s: 600, e: 601, line: 7 }],
+    selection: { start: 600, end: 700 },
+    trackLabel: '全部',
+    filtered: false,
+    backgrounds: [{ title: '本体产研交流背景', tags: ['本体'], content: '近端：龙嘉奇' }],
+  })
+  assert.match(withBackground, /### 本体产研交流背景（标签：本体）/)
+  assert.match(withBackground, /近端：龙嘉奇/)
+})
+
+test('footprint parsing skips the TOTAL row so buckets do not double count', () => {
+  const text = [
+    '    1000 KB        0 B          0 B          3    Malloc Small',
+    '    2000 KB        0 B          0 B          1    Untagged',
+    '       0 B      512 KB          0 B          1    mapped file',
+    '    phys_footprint: 3 MB',
+    '       3 MB     512 KB        64 KB    TOTAL',
+  ].join('\n')
+  const parts = parseFootprint(text, 0)
+  assert.equal(parts.heap, 1000 * 1024)
+  assert.equal(parts.fixed, 2000 * 1024)
+  assert.equal(parts.mapped, 512 * 1024)
+  assert.equal(parts.footprint, 3 * 1024 * 1024)
 })

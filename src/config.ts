@@ -50,7 +50,7 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv = process.env
     : (env.MEETING_MINUTES_LIFELOG || '').trim()
   return {
     lifelogRoot: rootInput ? path.resolve(expandHome(rootInput)) : null,
-    home: homeInput ? path.resolve(expandHome(homeInput)) : path.join(dshHome, 'meeting-minutes'),
+    home: homeInput ? path.resolve(expandHome(homeInput)) : path.join(dshHome, 'meeting-memo'),
     timeZone: resolveTimeZone(config.timeZone),
     windowStart: 6 * 60,
     windowEnd: 24 * 60,

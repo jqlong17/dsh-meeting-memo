@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "会议纪要",
-    "description": "读取 notta 生活日志：06:00–24:00 的 VAD 语音密度时间轴、选区 SenseVoice 转写，以及按时间线整理、可让 AI 生成的本地会议纪要（Markdown + JSON）。"
+    "description": "把会议录音变成结构化纪要：本地转写、要点、决策与待办。",
+    "detail": "docs/DETAIL.zh.md"
   }
 }

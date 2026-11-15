@@ -28,10 +28,10 @@ function findEsbuild() {
 
 const bin = findEsbuild()
 if (!bin) {
-  console.error('[dsh-meeting-minutes] esbuild not found; run `npm install` in this package or set ESBUILD_BIN')
+  console.error('[dsh-meeting-memo] esbuild not found; run `npm install` in this package or set ESBUILD_BIN')
   process.exit(1)
 }
-console.log(`[dsh-meeting-minutes] building host with ${bin}`)
+console.log(`[dsh-meeting-memo] building host with ${bin}`)
 
 const result = spawnSync(
   bin,

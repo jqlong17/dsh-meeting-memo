@@ -1,5 +1,5 @@
 /**
- * Browser half of `dsh-meeting-minutes`: one right-sidebar tab "会议纪要" with
+ * Browser half of `dsh-meeting-memo`: one right-sidebar tab "会议纪要" with
  * two internal tabs (今日 / 纪要). Data is read/written through the Host RPC
  * route; the bundle only requires `react`.
  */
@@ -13,7 +13,7 @@ import { createRpc } from './rpc.ts'
 import { NS, en, zh } from './labels.ts'
 
 /** Tab implementation identity; also the keyed dispatch key for the body. */
-export const PANEL_ID = 'dsh-meeting-minutes'
+export const PANEL_ID = 'dsh-meeting-memo'
 /** Tab kind, used by `sidebarRight.openTab(kind)`. */
 export const TAB_KIND = 'meeting-minutes'
 

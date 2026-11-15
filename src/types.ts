@@ -67,6 +67,102 @@ export interface DayPayload {
   warnings: string[]
   inspected: RootInspectionDTO[]
   home: string
+  sources?: SourceOptionDTO[]
+}
+
+export interface SourceOptionDTO {
+  id: string
+  label: string
+  root: string
+  exists: boolean
+  dayCount: number
+  active: boolean
+}
+
+export interface AsrModelDTO {
+  id: string
+  name: string
+  path: string
+  kind: string
+  capabilities?: string[]
+  usable?: boolean
+  format?: string
+  summary?: string
+  bytes?: number
+  source?: string
+  addedAt: string
+  note?: string
+}
+
+export interface ModelOfferDTO {
+  id: string
+  name: string
+  summary: string
+  capabilities: string[]
+  usable: boolean
+  format: string
+  bytesHint: number
+  url: string
+  present: boolean
+}
+
+export interface ModelDownloadDTO {
+  id: string
+  name: string
+  status: 'running' | 'done' | 'failed'
+  received: number
+  total: number | null
+  message: string
+}
+
+export interface AsrModelsPayload {
+  selectedId: string | null
+  library?: string | null
+  defaultRoot?: string
+  models: AsrModelDTO[]
+  offers?: ModelOfferDTO[]
+  downloads?: ModelDownloadDTO[]
+  bundledDir: string
+  suggestion: { ok: boolean; kind: string; path: string; name: string; missing: string[] } | null
+}
+
+export interface MemorySampleDTO {
+  at: string
+  rss: number
+  footprint: number
+  /** Headline: live charge plus external-model weights when they are not already charged. */
+  occupied?: number
+  model: number
+  mapped: number
+  audio: number
+  heap: number
+  fixed: number
+}
+
+export interface AsrStatusDTO {
+  enabled: boolean
+  running: boolean
+  phase: 'idle' | 'starting' | 'running' | 'paused' | 'failed'
+  mode: 'raw' | 'tracks' | 'merged'
+  language?: 'zhen' | 'zh' | 'en' | 'auto'
+  model: { id: string; name: string; path: string; kind?: string; format?: string; summary?: string; bytes?: number; appleCoreML?: boolean } | null
+  rssBytes?: number | null
+  memory?: MemorySampleDTO[]
+  logRoot: string
+  helper: string | null
+  mic: boolean | null
+  system: boolean | null
+  /** Whether audio frames really arrive on each track. */
+  audio?: {
+    mic: 'ok' | 'silent' | 'dead' | 'off'
+    system: 'ok' | 'silent' | 'dead' | 'off'
+    silentMinutes: number
+  }
+  audioRestarts?: number
+  message: string
+  startedAt: string | null
+  lastSnippetAt: string | null
+  lastError: string | null
 }
 
 export interface MinuteSessionDTO {
@@ -74,10 +170,8 @@ export interface MinuteSessionDTO {
   start: number
   end: number
   topic: string
-  summary: string
-  points: string[]
-  todos: string[]
-  backgrounds?: string[]
+  /** 这场会议的全部内容，一段 Markdown。 */
+  content: string
   source: 'draft' | 'ai' | 'agent' | 'manual'
   updatedAt: string
 }
@@ -109,12 +203,47 @@ export interface MinutesPayload {
   markdown: string
 }
 
+export interface SkillDTO {
+  id: string
+  name: string
+  description: string
+  prompt: string
+  builtin?: boolean
+  updatedAt: string
+}
+
+export interface SkillsPayload {
+  selectedId: string
+  skills: SkillDTO[]
+}
+
 export interface MinutesOverview {
   day: string
   today: string
   days: string[]
   root: string
   minutes: MinutesPayload
+}
+
+export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+
+export interface JobDTO {
+  id: string
+  day: string
+  start: number
+  end: number
+  backgroundIds: string[]
+  skillId?: string
+  supplements?: string
+  status: JobStatus
+  createdAt: string
+  startedAt?: string
+  finishedAt?: string
+  elapsedMs?: number
+  added?: number
+  model?: string
+  topic?: string
+  error?: { code: string; message: string; hint?: string }
 }
 
 export interface RangePayload {

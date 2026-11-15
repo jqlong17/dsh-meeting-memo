@@ -4,11 +4,14 @@
  * Everything is read-only on the notta log root; minutes + selection state live
  * under the plugin's own `home` directory.
  */
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { execFile } from 'node:child_process'
 import path from 'node:path'
 
 import { DAY_RE, detectLifelogRoot, listDayDirs } from './config.ts'
 import type { MeetingConfig } from './config.ts'
+import { listSources, readSelectedRoot, writeSelectedRoot } from './source.ts'
+import { asrLogRoot } from './asr-log.ts'
 import { dayStats, formatClock, hourlySummary, nowMinuteOfDay, parseClock, readDay, sliceRange, todayKey } from './lifelog.ts'
 import type { DayData } from './lifelog.ts'
 import {
@@ -16,6 +19,7 @@ import {
   minutesDir,
   normalizeSession,
   paths,
+  deriveLegacy,
   readDoc,
   readState,
   removeDoc,
@@ -26,6 +30,8 @@ import {
 } from './minutes.ts'
 import type { MinutesDoc, MinutesSession, SessionSource } from './minutes.ts'
 import { AiOutputError, buildPrompt, clipText, hasSwitchMarker, parseMeetings } from './ai.ts'
+import { fetchFeishuNotes } from './feishu-context.ts'
+import { builtinSkill } from './skills.ts'
 import { deleteBackground, readBackgroundSelection, readBackgrounds, upsertBackground, writeBackgroundSelection } from './backgrounds.ts'
 import type { BackgroundCard } from './backgrounds.ts'
 import type { ParsedMeeting } from './ai.ts'
@@ -147,8 +153,21 @@ export class MeetingService {
     this.llm = llm
   }
 
+  /**
+   * The panel only reads the plugin's own ASR log. An explicit `lifelogRoot` in
+   * the plugin config still wins, so tests and advanced setups can point elsewhere.
+   */
   private detectRoot(): ReturnType<typeof detectLifelogRoot> {
-    return detectLifelogRoot(this.config)
+    if (this.config.lifelogRoot) {
+      return detectLifelogRoot({ ...this.config, lifelogRoot: this.config.lifelogRoot })
+    }
+    const root = asrLogRoot(this.config.home)
+    try {
+      mkdirSync(root, { recursive: true })
+    } catch {
+      // Read-only home: fall through and let the day loader report an empty state.
+    }
+    return detectLifelogRoot({ ...this.config, lifelogRoot: root })
   }
 
   private loadDay(dayRequest?: string): DayLoad {
@@ -162,11 +181,15 @@ export class MeetingService {
     }
     const days = listDayDirs(detection.root)
     const today = todayKey(this.config.timeZone)
+    if (!days.length && existsSync(detection.root)) {
+      const data = readDay(detection.root, today, this.config.timeZone)
+      return { day: today, data, days: [today], root: detection.root, today }
+    }
     if (!days.length) {
       throw new MeetingError(
         'NO_DAYS',
-        `目录里还没有按日归档的生活日志：${detection.root}`,
-        '确认 notta-input 的生活日志已开启，或在插件配置里把 lifelogRoot 指到含 yyyy-MM-dd 文件夹的目录。',
+        `还没有任何录音转写：${detection.root}`,
+        '在「录音」页开启转写后，当天的转写会按日期归档到这里。',
       )
     }
     const requested = typeof dayRequest === 'string' ? dayRequest.trim() : ''
@@ -212,6 +235,7 @@ export class MeetingService {
       warnings: data.warnings,
       inspected: detection.inspected,
       home: this.config.home,
+      sources: listSources(this.config, root),
     }
   }
 
@@ -228,6 +252,11 @@ export class MeetingService {
       inspected: detection.inspected,
       window: { start: this.config.windowStart, end: this.config.windowEnd },
     }
+  }
+
+  sources(): { sources: ReturnType<typeof listSources> } {
+    const detection = this.detectRoot()
+    return { sources: listSources(this.config, detection.root) }
   }
 
   saveSelection(day: string, start: number, end: number): SelectionDTO {
@@ -251,16 +280,9 @@ export class MeetingService {
       updatedAt: doc.updatedAt,
       ...(doc.model ? { model: doc.model } : {}),
       sessions: doc.sessions.map((session) => ({
-        id: session.id,
-        start: session.start,
-        end: session.end,
-        topic: session.topic,
-        summary: session.summary,
-        points: session.points,
-        todos: session.todos,
-        ...(session.backgrounds?.length ? { backgrounds: session.backgrounds } : {}),
-        source: session.source,
-        updatedAt: session.updatedAt,
+        ...session,
+        // 过渡期：旧客户端只认 summary/decisions/todos/relatedDocs，这里从正文派生一份。
+        ...deriveLegacy(session.content ?? ''),
       })),
       jsonPath,
       mdPath,
@@ -352,6 +374,9 @@ export class MeetingService {
     endValue: unknown,
     sessionId?: string,
     backgroundIds?: unknown,
+    signal?: AbortSignal,
+    skillId?: string,
+    supplements?: string,
   ): Promise<MinutesPayload & { added: number; model: { provider: string; model: string }; elapsedMs: number }> {
     const { day, data } = this.loadDay(dayRequest)
     if (!this.llm) {
@@ -373,26 +398,37 @@ export class MeetingService {
     const clipped = clipText(slice.text, 30_000)
     const allowSplit = hasSwitchMarker(clipped.text)
     const cards = this.selectedBackgroundCards(backgroundIds)
+    // 内置提示词：不再支持多套写法，生成口径统一在 ai.ts 的 SYSTEM_PROMPT。
+    const skill = builtinSkill()
+    const extra = (supplements || '').trim()
+    const linked = [extra, ...cards.map((card) => card.content)].filter(Boolean).join('\n')
+    const fetched = linked ? await fetchFeishuNotes(linked) : ''
+    const supplementText = [extra, fetched].filter(Boolean).join('\n\n').slice(0, 24_000)
     const prompt = buildPrompt({
       day,
       range: { start: from, end: to },
       transcript: clipped.text,
       truncated: clipped.truncated,
       backgrounds: cards.map((card) => ({ title: card.title, tags: card.tags, content: card.content })),
+      system: skill.prompt,
+      ...(supplementText ? { supplements: supplementText } : {}),
     })
+    if (signal?.aborted) throw new MeetingError('CANCELLED', '已取消')
     const route = await this.resolveRoute()
     const startedAt = Date.now()
     let text = ''
     const blockTexts: string[] = []
+    const timeout = AbortSignal.timeout(360_000)
+    const callSignal = signal && typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, timeout]) : timeout
     try {
       const sentenceStream = this.llm.stream({
         provider: route.provider,
         model: route.model,
         system: prompt.system,
         messages: [{ role: 'user', content: [{ type: 'text', text: prompt.user }] }],
-        maxTokens: 4_000,
+        maxTokens: 8_000,
         temperature: 0.3,
-        signal: AbortSignal.timeout(90_000),
+        signal: callSignal,
         purpose: 'meeting-minutes',
         ...(sessionId ? { sessionId } : {}),
       })
@@ -411,12 +447,16 @@ export class MeetingService {
         if (record.type === 'finish') {
           const reason = record.reason as { kind?: unknown } | string | undefined
           const kind = typeof reason === 'string' ? reason : (reason && typeof reason.kind === 'string' ? reason.kind : undefined)
+          if (kind === 'aborted' || callSignal.aborted) {
+            throw new MeetingError('LLM_TIMEOUT', '生成超过 6 分钟，已停止等待', '选区或补充资料太长时会变慢。可以重试，或把区间缩短。')
+          }
           if (kind !== undefined && kind !== 'stop') {
             throw new MeetingError('LLM_FINISHED', `模型提前结束（${kind}）`, '可以重试；若总是被截断，换一个模型。')
           }
         }
       }
     } catch (error) {
+      if (signal?.aborted) throw new MeetingError('CANCELLED', '已取消')
       if (error instanceof MeetingError) throw error
       if (error instanceof Error && error.name === 'AbortError') {
         throw new MeetingError('LLM_TIMEOUT', '模型调用超时（90 秒）', '缩小选区，或在插件配置里换一个更快的 model。')
@@ -427,6 +467,7 @@ export class MeetingService {
         `模型路由 ${route.provider}/${route.model}；可在插件配置里指定 provider / model。`,
       )
     }
+    if (signal?.aborted) throw new MeetingError('CANCELLED', '已取消')
     const output = blockTexts.length ? blockTexts.join('') : text
     if (!output.trim()) throw new MeetingError('LLM_EMPTY', '模型没有返回内容', '重试；或换一个模型。')
     let meetings: ParsedMeeting[]
@@ -437,15 +478,18 @@ export class MeetingService {
       throw new MeetingError('AI_OUTPUT', detail, '可以重试；若连续失败，换一个模型或在插件配置里指定 provider / model。')
     }
     const now = new Date().toISOString()
+    const sourceNote = `本地 ASR 转写（${formatClock(from)}–${formatClock(to)}）`
     const sessions: MinutesSession[] = meetings.map((meeting, index) => ({
       id: `ai-${day}-${Math.round(meeting.start * 60)}-${Math.round(meeting.end * 60)}${meetings.length > 1 ? `-${index}` : ''}`,
       start: meeting.start,
       end: meeting.end,
       topic: meeting.topic,
-      summary: meeting.summary,
-      points: meeting.points,
-      todos: meeting.todos,
-      ...(cards.length ? { backgrounds: cards.map((card) => card.title) } : {}),
+      // 整场就是一段 Markdown；来源、参考背景这类元信息直接写进正文，不再拆字段。
+      content: [
+        meeting.content.trim(),
+        '',
+        `> 来源：${sourceNote}${cards.length ? ` · 参考背景：${cards.map((card) => card.title).join('、')}` : ''}${extra.trim() ? `\n> 补充：${extra.trim()}` : ''}`,
+      ].join('\n').trim(),
       source: 'ai',
       updatedAt: now,
     }))
@@ -471,15 +515,41 @@ export class MeetingService {
     }
   }
 
+
+  /**
+   * 在访达（或系统文件管理器）里打开一个本地资源：
+   * 文件定位到它（open -R），目录直接打开。
+   * 只允许打开存在且位于用户目录或 /tmp 下的绝对路径。
+   */
+  revealPath(target: unknown): { opened: string; kind: 'file' | 'folder' } {
+    const raw = String(target ?? '').trim()
+    if (!raw.startsWith('/')) throw new MeetingError('BAD_PATH', '只支持本地绝对路径')
+    const resolved = path.resolve(raw)
+    const home = this.config.home.startsWith('/') ? this.config.home : ''
+    const allowed = resolved.startsWith(process.env.HOME ?? '/Users')
+      || resolved.startsWith(home)
+      || resolved.startsWith('/tmp')
+      || resolved.startsWith('/Volumes')
+    if (!allowed) throw new MeetingError('BAD_PATH', `不允许打开这个路径：${resolved}`)
+    if (!existsSync(resolved)) throw new MeetingError('NOT_FOUND', `路径不存在：${resolved}`)
+    const isDir = statSync(resolved).isDirectory()
+    const args = isDir ? [resolved] : ['-R', resolved]
+    execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', args, (error) => {
+      if (error) throw error
+    })
+    return { opened: resolved, kind: isDir ? 'folder' : 'file' }
+  }
+
   upsertSession(day: string, raw: Record<string, unknown>): MinutesPayload {
     if (!DAY_RE.test(day)) throw new MeetingError('BAD_DAY', `非法日期：${day}`)
     const doc = readDoc(this.config.home, day)
     const normalized = normalizeSession(raw, day, 'manual')
     if (!normalized) throw new MeetingError('BAD_SESSION', '时段缺少有效的开始/结束时间')
     const before = doc.sessions.find((session) => session.id === normalized.id)
+    // 正文是一段 Markdown：编辑器没动它就保留原内容，不会被空值覆盖。
     const stamped: MinutesSession = {
       ...normalized,
-      ...(before?.backgrounds?.length && !normalized.backgrounds?.length ? { backgrounds: before.backgrounds } : {}),
+      content: normalized.content || before?.content || '',
       source: 'manual',
       updatedAt: new Date().toISOString(),
     }

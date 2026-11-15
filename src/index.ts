@@ -1,22 +1,26 @@
 /**
- * dsh-meeting-minutes — Host half.
+ * dsh-meeting-memo — Host half.
  *
  * Consumes notta-input's LifeLog day folders (VAD minute density + SenseVoice
  * transcripts) and exposes:
- * - the right-sidebar panel RPC (`/dsh-meeting-minutes/rpc`);
+ * - the right-sidebar panel RPC (`/dsh-mm/rpc`);
  * - Agent tools to read a day/range and to write timeline minutes locally.
  *
  * The plugin never writes into the notta log root. Minutes live under
- * `$DSH_HOME/meeting-minutes/minutes/<day>.{json,md}`.
+ * `$DSH_HOME/meeting-memo/minutes/<day>.{json,md}`.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
+import { AsrModelRegistry } from './asr-models.ts'
+import { ModelDownloads } from './model-download.ts'
+import { AsrRuntime } from './asr-service.ts'
 import { resolveConfig } from './config.ts'
+import { MinutesJobStore } from './jobs.ts'
 import { registerMeetingRoutes } from './rpc.ts'
 import { MeetingError, MeetingService } from './service.ts'
 
-export const name = 'dsh-meeting-minutes'
+export const name = 'dsh-meeting-memo'
 /** Weak dependencies: the Host must load even without a web UI or tools. */
 export const inject: string[] = []
 
@@ -46,16 +50,10 @@ const SESSIONS_SCHEMA = {
       start: { type: 'string' as const, description: '开始时间，HH:mm（本地时间）。', required: true },
       end: { type: 'string' as const, description: '结束时间，HH:mm；省略时按 start+30 分钟。' },
       topic: { type: 'string' as const, description: '主题，一句话，例如「插件面板与时间轴」。', required: true },
-      summary: { type: 'string' as const, description: '一到两句概述（可选）。' },
-      points: {
-        type: 'array' as const,
-        items: { type: 'string' as const },
-        description: '内容要点，每条一句短语（可选）。',
-      },
-      todos: {
-        type: 'array' as const,
-        items: { type: 'string' as const },
-        description: '待办事项（可选）。',
+      content: {
+        type: 'string' as const,
+        description: '这场会议的全部正文，一段 Markdown：先「> 💡 **本场背景与目标**」，再「### 核心结论」「### TODO」「### 相关链接与资源」。',
+        required: true,
       },
     },
   },
@@ -63,6 +61,26 @@ const SESSIONS_SCHEMA = {
 
 export function apply(ctx: Context, rawConfig?: unknown): void {
   const service = new MeetingService(resolveConfig(rawConfig))
+  const jobs = new MinutesJobStore(service.config.home, async (job, signal) => {
+    const result = await service.generateMinutes(job.day, job.start, job.end, undefined, job.backgroundIds, signal, job.skillId, job.supplements)
+    const topic = result.sessions.find((session) => session.end > job.start && session.start < job.end)?.topic
+    return {
+      added: result.added,
+      model: `${result.model.provider}/${result.model.model}`,
+      ...(topic ? { topic } : {}),
+      elapsedMs: result.elapsedMs,
+    }
+  })
+  const asrModels = new AsrModelRegistry(service.config.home)
+  const downloads = new ModelDownloads(asrModels)
+  const asr = new AsrRuntime(service.config.home, service.config.timeZone)
+  ctx.effect(() => {
+    void asr.start()
+    return () => {
+      jobs.dispose()
+      asr.dispose()
+    }
+  }, 'meeting-minutes: jobs')
 
   ctx.inject(['llm'], (scope: Context) => {
     const llm = (scope as unknown as { llm?: Record<string, unknown> }).llm
@@ -85,7 +103,7 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
   })
 
   ctx.inject(['connection', 'webServer'], (scope: Context) => {
-    scope.effect(() => registerMeetingRoutes(scope, service), 'meeting-minutes: panel rpc')
+    scope.effect(() => registerMeetingRoutes(scope, service, jobs, { models: asrModels, runtime: asr, downloads }), 'meeting-minutes: panel rpc')
   })
 
   ctx.inject(['tools'], (scope: Context) => {
@@ -94,7 +112,7 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
 
     scope.effect(() => tools.register(defineTool({
       name: 'meeting_minutes_today',
-      description: '查看本地「会议纪要」插件的当日情况：notta 生活日志的 VAD 分钟密度（每小时捕获分钟数、语音分钟数、字数）、当前选中的时间区间、可用日期，以及已保存纪要的路径。不返回逐句转写；要看转写用 meeting_minutes_transcript。',
+      description: '查看本地「会议纪要」插件的当日情况：语音密度（每小时捕获分钟数、语音分钟数、字数）、当前选中的时间区间、可用日期，以及已保存记录的路径。不返回逐句转写；要看转写用 meeting_minutes_transcript。',
       parameters: {
         day: { type: 'string', description: '日期 yyyy-MM-dd；不传取最近一天。' },
       },
@@ -130,7 +148,7 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
 
     scope.effect(() => tools.register(defineTool({
       name: 'meeting_minutes_generate',
-      description: '用 Host 当前模型（可在插件配置指定 provider/model）把某区间的 SenseVoice 转写整理成会议纪要并写入本地。默认整段算一场会议，只产出一条；只有转写里出现明确换场标志时才拆成多条。会替换该区间内已有条目。',
+      description: '用 Host 当前模型（可在插件配置指定 provider/model）把某区间的 SenseVoice 转写整理成记录并写入本地。默认整段算一段，只产出一条；只有转写里出现明确换段标志时才拆成多条。会替换该区间内已有条目。',
       parameters: {
         day: { type: 'string', description: '日期 yyyy-MM-dd；不传取最近一天。' },
         start: { type: 'string', description: '开始时间 HH:mm；不传用插件里保存的选区起点。' },
@@ -155,7 +173,7 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
 
     scope.effect(() => tools.register(defineTool({
       name: 'meeting_minutes_save',
-      description: '把整理好的会议纪要写成本地文件：每个时段含时间点、主题、内容要点、TODO。默认 merge：按时间区间替换同一时段的旧条目；mode=replace 覆盖当天全部。写完后返回 Markdown 路径，面板「纪要」标签会刷新显示。',
+      description: '把整理好的记录写成本地文件：每个时段含时间点、主题、正文、TODO。默认 merge：按时间区间替换同一时段的旧条目；mode=replace 覆盖当天全部。写完后返回 Markdown 路径，面板「纪要」标签会刷新显示。',
       parameters: {
         day: { type: 'string', description: '日期 yyyy-MM-dd；不传取最近一天。' },
         sessions: SESSIONS_SCHEMA,
@@ -183,7 +201,7 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
 
     scope.effect(() => tools.register(defineTool({
       name: 'meeting_minutes_read',
-      description: '读取某天已保存的会议纪要（JSON + Markdown 文本）。用于接着上次的内容继续补写，避免重复整理同一时段。',
+      description: '读取某天已保存的记录（JSON + Markdown 文本）。用于接着上次的内容继续补写，避免重复整理同一时段。',
       parameters: {
         day: { type: 'string', description: '日期 yyyy-MM-dd；不传取最近一天。' },
       },

@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const BUNDLE = path.join(repo, 'lib/client.js')
-const PACKAGE_ID = 'dsh-meeting-minutes'
+const PACKAGE_ID = JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8')).name
 const PLATFORM_REQUIRES = ['react', 'react/jsx-runtime']
 const TAB_KIND = 'meeting-minutes'
 const LOCALE_NS = 'meeting-minutes'
@@ -134,8 +134,25 @@ for (const key of ['panel.tab.today', 'panel.tab.minutes', 'panel.density', 'pan
   assert.ok(dictionaries.zh[key] && dictionaries.en[key], `locale key ${key} must exist in zh and en`)
 }
 
-for (const needle of ['会议纪要', 'AI 生成纪要', 'VAD 语音密度', '最近 2 小时']) {
+for (const needle of ['会议纪要', '关于', '复制这段话', 'AI 生成纪要', 'VAD 语音密度', '最近 2 小时']) {
   assert.ok(code.includes(needle), `bundle must contain Chinese copy "${needle}"`)
+}
+
+// 7. 真跑一遍组件体：hooks 是桩，但渲染期引用错误会在这里炸出来。
+const panel = calls.slots[0]?.component ?? calls.tabs.find((entry) => entry.component)?.component
+if (typeof panel === 'function') {
+  const props = {
+    rpc: async () => ({ ok: false, error: { code: 'stub', message: 'stub' } }),
+    t: (key) => dictionaries.zh[key] ?? key,
+    sessionId: 'stub',
+  }
+  let threw = null
+  try {
+    panel(props)
+  } catch (error) {
+    threw = error
+  }
+  assert.equal(threw, null, `panel render threw: ${threw && threw.message}`)
 }
 
 console.log('[check-client] ok — tab, body, locale and copy verified')

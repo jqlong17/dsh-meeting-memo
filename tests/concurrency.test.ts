@@ -35,7 +35,7 @@ function fakeLlm(): LlmRuntimeLike {
       const start = range?.[1] ?? '09:00'
       const end = range?.[2] ?? '09:20'
       const json = JSON.stringify({
-        meetings: [{ start, end, topic: `会议 ${start}`, summary: '并发写入测试', points: ['一个要点'], todos: [] }],
+        meetings: [{ start, end, topic: `会议 ${start}`, content: `> 并发写入测试 ${start}` }],
       })
       yield { type: 'text-delta', text: json }
       yield { type: 'finish', reason: { kind: 'stop' } }

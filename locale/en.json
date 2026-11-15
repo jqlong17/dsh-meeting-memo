@@ -1,6 +1,7 @@
 {
   "meta": {
-    "title": "Meeting minutes",
-    "description": "Reads the notta life log: a 06:00–24:00 VAD speech-density timeline, SenseVoice transcripts for the selected range, and AI-generated timeline meeting minutes stored locally as Markdown and JSON."
+    "title": "Meeting Minutes",
+    "description": "Turn meeting audio into structured minutes: local transcription, key points, decisions, and to-dos.",
+    "detail": "docs/DETAIL.md"
   }
 }

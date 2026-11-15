@@ -67,7 +67,8 @@ export interface HourRow {
 export const TRACK_LABELS: Record<string, string> = {
   mic: '麦克风',
   system: '系统声音',
-  meeting: '会议',
+  merged: '合并',
+  meeting: '合并',
 }
 
 export function trackLabel(track: string | undefined): string {

@@ -4,7 +4,7 @@
  * One day = one JSON document (canonical) plus one Markdown mirror for reading
  * and for the user's own notes. Nothing leaves the machine.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 import { formatClock } from './lifelog.ts'
@@ -17,11 +17,8 @@ export interface MinutesSession {
   start: number
   end: number
   topic: string
-  summary: string
-  points: string[]
-  todos: string[]
-  /** Titles of background cards used for this entry. */
-  backgrounds?: string[]
+  /** 这场会议的全部内容，就是一段 Markdown（背景与目标 / 核心结论 / TODO / 相关链接与资源）。 */
+  content: string
   source: SessionSource
   updatedAt: string
 }
@@ -65,6 +62,7 @@ export function paths(home: string, day: string): { jsonPath: string; mdPath: st
   const dir = minutesDir(home)
   return {
     jsonPath: path.join(dir, `${safe}.json`),
+    // 一天的纪要在同一个 md 文件里，按场次分节。
     mdPath: path.join(dir, `${safe}.md`),
   }
 }
@@ -117,7 +115,9 @@ function asStringList(value: unknown): string[] {
     return value.map((item) => String(item ?? '').trim()).filter(Boolean)
   }
   if (typeof value === 'string') {
-    return value.split('\n').map((line) => line.replace(/^[-*•\s]+/, '').trim()).filter(Boolean)
+    return value.split('\n')
+      .map((line) => (line.trim().startsWith('**') ? line.trim() : line.replace(/^[-*•]\s*/, '').trim()))
+      .filter(Boolean)
   }
   return []
 }
@@ -129,10 +129,7 @@ export function normalizeSession(raw: Record<string, unknown>, day: string, fall
   const startClamped = Math.max(0, Math.min(1439, start))
   const endClamped = Math.max(startClamped + 1 / 60, Math.min(1440, end))
   const topic = String(raw.topic ?? '').trim() || '未命名时段'
-  const points = asStringList(raw.points).slice(0, 40)
-  const todos = asStringList(raw.todos).slice(0, 20)
-  const backgrounds = asStringList(raw.backgrounds).slice(0, 20)
-  const summary = String(raw.summary ?? '').trim()
+  const content = String(raw.content ?? '').trim()
   const sourceRaw = String(raw.source ?? fallbackSource)
   const source: SessionSource = sourceRaw === 'draft' || sourceRaw === 'ai' || sourceRaw === 'agent' || sourceRaw === 'manual' ? sourceRaw : fallbackSource
   const id = String(raw.id ?? '').trim() || `s-${day}-${Math.round(startClamped * 60)}-${Math.round(endClamped * 60)}`
@@ -141,13 +138,96 @@ export function normalizeSession(raw: Record<string, unknown>, day: string, fall
     start: startClamped,
     end: endClamped,
     topic,
-    summary,
-    points,
-    todos,
-    ...(backgrounds.length ? { backgrounds } : {}),
+    content,
     source,
     updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : new Date().toISOString(),
   }
+}
+
+/** 链接渲染成 Markdown；本地绝对路径用等宽文本，方便直接复制。 */
+function formatLink(raw: string): string {
+  const text = raw.trim()
+  const match = text.match(/https?:\/\/\S+/)
+  if (match) {
+    const url = match[0].replace(/[，。；、,.)）\]]+$/, '')
+    const label = text.replace(match[0], '').replace(/\s*[-—:：|·]\s*$/, '').trim() || url
+    return `[${label}](${url})`
+  }
+  const local = text.match(/(\/Users\/[^\s]+|~\/[^\s]+)/)
+  if (local) {
+    const path = local[0].replace(/[，。；、,.)）\]]+$/, '')
+    const rest = text.replace(local[0], '').replace(/\s*[-—:：|·]\s*$/, '').trim()
+    return rest ? `${rest}：\`${path}\`` : `\`${path}\``
+  }
+  return text
+}
+
+export function renderSession(session: MinutesSession, day: string, timeZone: string, model?: string): string {
+  const lines: string[] = []
+  lines.push(`# ${formatClock(session.start)}–${formatClock(session.end)} · ${session.topic}`)
+  lines.push('')
+  lines.push(`- 日期：${day}`)
+  lines.push(`- 更新时间：${formatStamp(session.updatedAt, timeZone)}`)
+  if (model) lines.push(`- 生成模型：${model}`)
+  lines.push('')
+  appendSessionLines(lines, session, { heading: false, meta: false })
+  return lines.join('\n')
+}
+
+function appendSessionLines(
+  lines: string[],
+  session: MinutesSession,
+  options: { heading?: boolean; meta?: boolean } = {},
+): void {
+  const { heading = true, meta = true } = options
+  if (heading) {
+    lines.push(`## ${formatClock(session.start)}–${formatClock(session.end)} · ${session.topic}`)
+    lines.push('')
+  }
+  if (meta) {
+    lines.push(`- **时间**：${formatClock(session.start)}–${formatClock(session.end)}`)
+    lines.push(`- **主题**：${session.topic}`)
+    lines.push('')
+  }
+  const body = session.content.trim()
+  if (body) {
+    for (const line of body.split('\n')) lines.push(line)
+    lines.push('')
+  }
+}
+
+
+/** 从一段正文里拆出旧客户端仍在读的字段（过渡期兼容，新客户端只用 content）。 */
+export function deriveLegacy(content: string): {
+  summary: string
+  decisions: string[]
+  todos: string[]
+  relatedDocs: string[]
+} {
+  const lines = content.split('\n')
+  let section = ''
+  const decisions: string[] = []
+  const todos: string[] = []
+  const relatedDocs: string[] = []
+  const quote: string[] = []
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (line.startsWith('> ')) {
+      const text = line.slice(2).trim()
+      if (text && !text.startsWith('💡') && !text.startsWith('来源：') && !text.startsWith('参考背景：')) quote.push(text)
+      continue
+    }
+    if (line.startsWith('### ')) {
+      section = line.slice(4).trim()
+      continue
+    }
+    if (!line.startsWith('- ')) continue
+    const body = line.slice(2).trim()
+    if (section.includes('核心结论')) decisions.push(body)
+    else if (section.toUpperCase().includes('TODO')) todos.push(body.replace(/^\[( |x|X)\]\s*/, ''))
+    else if (section.includes('相关链接')) relatedDocs.push(body)
+  }
+  return { summary: quote.join(' ').trim(), decisions, todos, relatedDocs }
 }
 
 export function renderMarkdown(doc: MinutesDoc, timeZone: string): string {
@@ -155,7 +235,6 @@ export function renderMarkdown(doc: MinutesDoc, timeZone: string): string {
   lines.push(`# 会议纪要 · ${doc.day}`)
   lines.push('')
   lines.push(`- 更新时间：${formatStamp(doc.updatedAt, timeZone)}`)
-  lines.push('- 数据来源：notta 生活日志（VAD 分钟密度 + SenseVoice 转写）')
   if (doc.model) lines.push(`- 生成模型：${doc.model}`)
   if (doc.note) lines.push(`- 说明：${doc.note}`)
   lines.push('')
@@ -165,21 +244,7 @@ export function renderMarkdown(doc: MinutesDoc, timeZone: string): string {
     return lines.join('\n')
   }
   for (const session of doc.sessions) {
-    lines.push(`## ${formatClock(session.start)}–${formatClock(session.end)} · ${session.topic}`)
-    lines.push('')
-    lines.push(`- **时间**：${formatClock(session.start)}–${formatClock(session.end)}`)
-    lines.push(`- **主题**：${session.topic}`)
-    if (session.summary) lines.push(`- **概述**：${session.summary}`)
-    if (session.backgrounds?.length) lines.push(`- **参考背景**：${session.backgrounds.join('、')}`)
-    if (session.points.length) {
-      lines.push('- **内容**：')
-      for (const point of session.points) lines.push(`  - ${point}`)
-    }
-    if (session.todos.length) {
-      lines.push('- **TODO**：')
-      for (const todo of session.todos) lines.push(`  - [ ] ${todo}`)
-    }
-    lines.push('')
+    appendSessionLines(lines, session)
   }
   return lines.join('\n')
 }
@@ -216,6 +281,12 @@ export function writeDoc(home: string, day: string, doc: MinutesDoc, timeZone: s
   }
   writeAtomic(jsonPath, `${JSON.stringify(normalized, null, 2)}\n`)
   writeAtomic(mdPath, `${renderMarkdown(normalized, timeZone)}\n`)
+  // 迁移：早期按场次拆分的目录不再维护，整目录清掉。
+  try {
+    rmSync(path.join(minutesDir(home), day), { recursive: true, force: true })
+  } catch {
+    // 不存在即忽略。
+  }
   return { doc: normalized, jsonPath, mdPath }
 }
 
@@ -247,12 +318,15 @@ export function writeState(home: string, state: SelectionState): void {
 
 export function removeDoc(home: string, day: string): void {
   const { jsonPath, mdPath } = paths(home, day)
-  for (const file of [jsonPath, mdPath]) {
-    try {
-      unlinkSync(file)
-    } catch {
-      // Missing files are fine: delete is idempotent.
-    }
+  try {
+    unlinkSync(jsonPath)
+  } catch {
+    // Missing files are fine: delete is idempotent.
+  }
+  try {
+    rmSync(mdPath, { recursive: true, force: true })
+  } catch {
+    // Missing directories are fine too.
   }
 }
 

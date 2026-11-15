@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Browser-half build for `dsh-meeting-minutes`.
+ * Browser-half build for `dsh-meeting-memo`.
  *
  * The DSH web shell loads the bundle as a classic script that only registers a
  * factory: `window.__ModuleLoader__.load({ id, factory })`. Only the platform
@@ -14,7 +14,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const PACKAGE_ID = 'dsh-meeting-minutes'
+const PACKAGE_ID = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8')).name
 const PLATFORM_REQUIRES = ['react', 'react/jsx-runtime']
 const ENTRY = path.join(repo, 'src/client/index.ts')
 const RAW = path.join(repo, 'lib/client.raw.js')

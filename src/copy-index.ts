@@ -12,13 +12,23 @@ export interface IndexSegment {
   line?: number
 }
 
+export interface IndexBackground {
+  title: string
+  tags?: string[]
+  content: string
+}
+
 export interface BuildIndexCopyInput {
   day: string
   file: string
+  /** Current source name, so a switched log is not labeled as notta. */
+  sourceLabel?: string
   segments: IndexSegment[]
   selection: { start: number; end: number }
   trackLabel: string
   filtered: boolean
+  /** Background cards the user ticked for this meeting. */
+  backgrounds?: IndexBackground[]
 }
 
 export function clockOf(minute: number): string {
@@ -64,14 +74,30 @@ export function buildIndexCopy(input: BuildIndexCopyInput): string {
     : '—'
   const selection = `${input.day} ${clockOf(input.selection.start)} – ${clockOf(input.selection.end)}`
   const track = input.filtered ? `${input.trackLabel}（行号只含该轨道）` : input.trackLabel
+  const title = input.sourceLabel ? `${input.sourceLabel}切片` : '当前日志切片'
+  const backgrounds = (input.backgrounds ?? []).filter((card) => card.title.trim() || card.content.trim())
+  const backgroundBlock = backgrounds.length
+    ? [
+      '背景资料（用户勾选的长期背景，用来理解人名、项目和术语；不是这场会说的话，不要当成会议结论）：',
+      ...backgrounds.map((card) => {
+        const tags = card.tags?.filter(Boolean).join('、')
+        const head = tags ? `### ${card.title}（标签：${tags}）` : `### ${card.title}`
+        return `${head}\n${card.content.trim()}`
+      }),
+    ]
+    : ['背景资料: 无']
   return [
-    'notta 生活日志切片',
+    title,
+    '这是一份本地语音转写的索引，不是转写正文。请只读下面指定的行，不要猜文件里的其他内容。',
     `文件: ${input.file}`,
-    `行号: ${lines || '—'}`,
-    `选区: ${selection}`,
-    `数据: ${dataRange}`,
-    `轨道: ${track}`,
-    `片段: ${segments.length}`,
-    '说明: 行号为 1-based、含端点；打开上述文件读取这些行即可得到 SenseVoice 原始转写。',
+    '格式: JSONL，一行一个 JSON 对象。行号从 1 开始，含两端。',
+    `要读的行: ${lines || '—'}`,
+    '每行字段: text 是转写正文；startAt / endAt 是 UTC 时间；track 是音轨（mic 麦克风，system 系统声音，merged 合并）；id 是这条的编号。',
+    `用户选区: ${selection}（上海时间，只是当时框选的范围）`,
+    `这些行实际覆盖: ${dataRange}（上海时间）`,
+    `轨道筛选: ${track}`,
+    `片段数: ${segments.length}`,
+    '注意: 转写可能有错字、断句和口头语。时间以 startAt / endAt 为准，不要用文件修改时间。',
+    ...backgroundBlock,
   ].join('\n')
 }

@@ -6,16 +6,31 @@
  * readout. No chart library — the browser bundle may only require `react`.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactElement } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from 'react'
 
-const FG = 'var(--dsw-alias-label-primary, inherit)'
-const FG3 = 'var(--dsw-alias-label-secondary, inherit)'
-const CAPTION = 'var(--dsw-alias-label-secondary, rgba(0,0,0,0.55))'
-const BORDER = 'var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.12))'
-const ACCENT = 'var(--dsw-alias-brand-primary, #4a63e7)'
-const SUCCESS = 'var(--dsw-alias-state-success-primary, #1a7f37)'
-const TOOLTIP_BG = 'var(--dsw-alias-bg-overlay, rgba(20, 22, 28, 0.92))'
+const FG = 'var(--dsw-alias-label-primary)'
+const FG3 = 'var(--dsw-alias-label-secondary)'
+const CAPTION = 'var(--dsw-alias-label-secondary)'
+const BORDER = 'var(--dsw-alias-border-l1)'
+const ACCENT = 'var(--pl-brand)'
+const ACCENT_SOFT = 'var(--pl-brand-soft)'
+// 未选中数据用淡蓝，不用 fill-l2（该 token 未定义，SVG 会 fallback 成黑）
+const NEUTRAL_BAR = 'var(--pl-brand-soft)'
+// 选区底色按规范取品牌蓝 10%，和未选中数据的淡蓝区分开
+const SELECTION_WASH = 'color-mix(in srgb, var(--pl-brand) 10%, transparent)'
+const SUCCESS = 'var(--dsw-alias-state-success-primary)'
+const TOOLTIP_BG = 'var(--dsw-alias-bg-layer-1)'
+const CARD_BORDER = 'var(--dsw-alias-border-l2)'
 const MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace'
+
+const FS = {
+  xs: 'var(--pl-fs-xs)',
+  sm: 'var(--pl-fs-sm)',
+} as const
+
+const RADIUS_CHIP = 'var(--pl-radius-chip)'
+const RADIUS_PILL = 'var(--pl-radius-pill)'
 
 export interface TimelineBucket {
   /** Minute of local day. */
@@ -95,8 +110,8 @@ function clamp(value: number, min: number, max: number): number {
 export function TimelineChart(props: TimelineChartProps) {
   const {
     buckets,
-    start,
-    end,
+    start: boundsStart,
+    end: boundsEnd,
     selection,
     intervals = [],
     intervalsLabel,
@@ -111,10 +126,54 @@ export function TimelineChart(props: TimelineChartProps) {
   const [wrapperRef, width] = useElementWidth()
   const svgRef = useRef<SVGSVGElement | null>(null)
   const dragRef = useRef<{ anchor: number; moved: boolean; pointerId: number } | null>(null)
+  const scrubRef = useRef<{ pointerId: number; originX: number; originStart: number; span: number } | null>(null)
   const [hover, setHover] = useState<number | null>(null)
+  const [view, setView] = useState({ start: boundsStart, end: boundsEnd })
+  const viewRef = useRef(view)
+  viewRef.current = view
 
+  useEffect(() => {
+    setView({ start: boundsStart, end: boundsEnd })
+  }, [boundsStart, boundsEnd])
+
+  useEffect(() => {
+    const element = wrapperRef.current
+    if (!element) return
+    const onWheel = (event: WheelEvent): void => {
+      if (scrubRef.current) return
+      const chart = svgRef.current?.getBoundingClientRect()
+      if (!chart || event.clientY > chart.bottom) return
+      event.preventDefault()
+      const rect = svgRef.current?.getBoundingClientRect()
+      const current = viewRef.current
+      const spanNow = Math.max(1, current.end - current.start)
+      const plotW = Math.max(20, (rect?.width ?? width) - PADDING.left - PADDING.right)
+      const ratio = rect
+        ? clamp((event.clientX - rect.left - PADDING.left) / plotW, 0, 1)
+        : 0.5
+      const anchor = current.start + ratio * spanNow
+      const boundsSpan = Math.max(1, boundsEnd - boundsStart)
+      const nextSpan = clamp(spanNow * (event.deltaY < 0 ? 0.8 : 1.25), 15, boundsSpan)
+      let nextStart = anchor - ratio * nextSpan
+      let nextEnd = nextStart + nextSpan
+      if (nextStart < boundsStart) {
+        nextStart = boundsStart
+        nextEnd = boundsStart + nextSpan
+      }
+      if (nextEnd > boundsEnd) {
+        nextEnd = boundsEnd
+        nextStart = Math.max(boundsStart, boundsEnd - nextSpan)
+      }
+      setView({ start: nextStart, end: nextEnd })
+    }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    return () => element.removeEventListener('wheel', onWheel)
+  }, [boundsStart, boundsEnd, width, wrapperRef])
+
+  const start = view.start
+  const end = view.end
   const span = Math.max(1, end - start)
-  const bin = Math.max(1, binMinutes)
+  const bin = span <= 90 ? 1 : span <= 240 ? Math.min(binMinutes, 2) : Math.max(1, binMinutes)
   const binCount = Math.max(1, Math.ceil(span / bin))
 
   const { density, captured } = useMemo(() => {
@@ -144,7 +203,8 @@ export function TimelineChart(props: TimelineChartProps) {
 
   const hourTicks = useMemo(() => {
     const ticks: number[] = []
-    for (let minute = Math.ceil(start / 60) * 60; minute <= end; minute += 60) ticks.push(minute)
+    const step = span > 360 ? 60 : span > 120 ? 30 : span > 45 ? 10 : 5
+    for (let minute = Math.ceil(start / step) * step; minute <= end; minute += step) ticks.push(minute)
     return ticks
   }, [start, end])
 
@@ -238,7 +298,7 @@ export function TimelineChart(props: TimelineChartProps) {
           if (!dragRef.current) setHover(null)
         }}
       >
-        <text x={PADDING.left} y={13} fontSize={10} fill={CAPTION}>
+        <text x={PADDING.left} y={13} fontSize={FS.xs} fill={CAPTION}>
           {labels.density}
           <tspan dx={6} opacity={0.7}>{labels.hint}</tspan>
         </text>
@@ -255,7 +315,7 @@ export function TimelineChart(props: TimelineChartProps) {
               strokeDasharray={value === 0 ? undefined : '2 4'}
               opacity={value === 0 ? 0.9 : 0.55}
             />
-            <text x={PADDING.left - 6} y={yOf(value) + 3} fontSize={9} fill={CAPTION} textAnchor="end">
+            <text x={PADDING.left - 6} y={yOf(value) + 3} fontSize={FS.xs} fill={CAPTION} textAnchor="end">
               {value === 0 ? '0' : `${value * 100}%`}
             </text>
           </g>
@@ -318,8 +378,7 @@ export function TimelineChart(props: TimelineChartProps) {
           y={PADDING.top}
           width={selW}
           height={plotH}
-          fill={ACCENT}
-          opacity={0.1}
+          fill={SELECTION_WASH}
           pointerEvents="none"
         />
         <line x1={selX} x2={selX} y1={PADDING.top} y2={baseY} stroke={ACCENT} strokeWidth={1.2} pointerEvents="none" />
@@ -353,13 +412,16 @@ export function TimelineChart(props: TimelineChartProps) {
                 width={barWidth}
                 height={2}
                 rx={1}
-                fill={ACCENT}
-                opacity={0.3}
+                fill={NEUTRAL_BAR}
+                opacity={0.8}
                 pointerEvents="none"
               />
             )
           }
           const top = yOf(value)
+          // 数据本体一律中性色，只有落在选区内的柱才上品牌色。
+          const binStart = start + index * bin
+          const inSelection = binStart + bin > selStart && binStart < selEnd
           return (
             <rect
               key={index}
@@ -368,20 +430,20 @@ export function TimelineChart(props: TimelineChartProps) {
               width={barWidth}
               height={Math.max(1, baseY - top)}
               rx={Math.min(2, barWidth / 2)}
-              fill={ACCENT}
-              opacity={0.35 + value * 0.6}
+              fill={inSelection ? ACCENT : NEUTRAL_BAR}
+              opacity={inSelection ? 0.9 : 0.85}
               pointerEvents="none"
             />
           )
         })}
 
-        <text x={selX} y={PADDING.top - 8} fontSize={9.5} fill={FG} fontFamily={MONO} pointerEvents="none">
+        <text x={selX} y={PADDING.top - 8} fontSize={FS.xs} fill={FG} fontFamily={MONO} pointerEvents="none">
           {formatTime(selStart)}
         </text>
         <text
           x={selX + selW}
           y={PADDING.top - 8}
-          fontSize={9.5}
+          fontSize={FS.xs}
           fill={FG}
           fontFamily={MONO}
           textAnchor="end"
@@ -399,7 +461,7 @@ export function TimelineChart(props: TimelineChartProps) {
               key={`label-${minute}`}
               x={xOf(minute)}
               y={baseY + 13}
-              fontSize={9}
+              fontSize={FS.xs}
               fill={FG3}
               textAnchor={index === 0 ? 'start' : last ? 'end' : 'middle'}
               opacity={0.85}
@@ -422,7 +484,7 @@ export function TimelineChart(props: TimelineChartProps) {
               strokeDasharray="3 3"
               opacity={0.75}
             />
-            <text x={xOf(now) + 3} y={PADDING.top + 9} fontSize={8.5} fill={ACCENT}>
+            <text x={xOf(now) + 3} y={PADDING.top + 9} fontSize={FS.xs} fill={ACCENT}>
               {labels.now}
             </text>
           </g>
@@ -441,7 +503,7 @@ export function TimelineChart(props: TimelineChartProps) {
               pointerEvents="none"
             />
             {intervalsLabel ? (
-              <text x={PADDING.left - 6} y={laneY + 9} fontSize={8.5} fill={CAPTION} textAnchor="end">
+              <text x={PADDING.left - 6} y={laneY + 9} fontSize={FS.xs} fill={CAPTION} textAnchor="end">
                 {intervalsLabel}
               </text>
             ) : null}
@@ -468,7 +530,7 @@ export function TimelineChart(props: TimelineChartProps) {
                     strokeWidth={1}
                   />
                   {showLabel ? (
-                    <text x={x + 5} y={laneY + 8.5} fontSize={8.5} fill={SUCCESS} pointerEvents="none">
+                    <text x={x + 5} y={laneY + 8.5} fontSize={FS.xs} fill={SUCCESS} pointerEvents="none">
                       {label.length > 13 ? `${label.slice(0, 12)}…` : label}
                     </text>
                   ) : null}
@@ -487,14 +549,14 @@ export function TimelineChart(props: TimelineChartProps) {
             top: 16,
             transform: 'translateX(-50%)',
             padding: '4px 7px',
-            borderRadius: 6,
+            borderRadius: RADIUS_CHIP,
             background: TOOLTIP_BG,
-            color: '#fff',
-            fontSize: 10.5,
-            lineHeight: 1.35,
+            color: FG,
+            border: `1px solid ${CARD_BORDER}`,
+            fontSize: FS.xs,
+            lineHeight: 1.45,
             whiteSpace: 'nowrap',
             pointerEvents: 'none',
-            boxShadow: '0 4px 14px rgba(0,0,0,0.22)',
           }}
         >
           <div style={{ fontFamily: MONO }}>{formatTime(hoverFrom)}–{formatTime(hoverTo)}</div>
@@ -503,6 +565,113 @@ export function TimelineChart(props: TimelineChartProps) {
           </div>
         </div>
       ) : null}
+      <TimelineScrubber
+        width={plotW}
+        inset={PADDING.left}
+        boundsStart={boundsStart}
+        boundsEnd={boundsEnd}
+        viewStart={start}
+        viewEnd={end}
+        formatTime={formatTime}
+        onPan={(nextStart, lockedSpan) => {
+          const spanNow = Math.max(1, lockedSpan)
+          const maxStart = Math.max(boundsStart, boundsEnd - spanNow)
+          const clamped = clamp(nextStart, boundsStart, maxStart)
+          setView({ start: clamped, end: clamped + spanNow })
+        }}
+        scrubRef={scrubRef}
+      />
+    </div>
+  )
+}
+
+function TimelineScrubber(props: {
+  width: number
+  inset: number
+  boundsStart: number
+  boundsEnd: number
+  viewStart: number
+  viewEnd: number
+  formatTime: (minute: number) => string
+  onPan: (start: number, span: number) => void
+  scrubRef: { current: { pointerId: number; originX: number; originStart: number; span: number } | null }
+}): ReactElement {
+  const boundsSpan = Math.max(1, props.boundsEnd - props.boundsStart)
+  const span = Math.max(1, props.viewEnd - props.viewStart)
+  const widthPct = Math.min(100, Math.max(0, (span / boundsSpan) * 100))
+  const leftPct = Math.min(100 - widthPct, Math.max(0, ((props.viewStart - props.boundsStart) / boundsSpan) * 100))
+  const thumbWidth = `${widthPct}%`
+  const thumbLeft = `${leftPct}%`
+  const trackRef = useRef<HTMLDivElement | null>(null)
+
+  const minuteAt = (clientX: number): number => {
+    const rect = trackRef.current?.getBoundingClientRect()
+    if (!rect || rect.width <= 0) return props.boundsStart
+    const ratio = clamp((clientX - rect.left) / rect.width, 0, 1)
+    return props.boundsStart + ratio * boundsSpan
+  }
+
+  return (
+    <div style={{ margin: '6px 0 2px 0', marginLeft: props.inset, width: props.width, boxSizing: 'border-box' }}>
+      <div
+        ref={trackRef}
+        style={{
+          position: 'relative',
+          height: 14,
+          borderRadius: RADIUS_PILL,
+          background: ACCENT_SOFT,
+          border: `1px solid ${BORDER}`,
+          cursor: 'pointer',
+          overflow: 'hidden',
+          boxSizing: 'border-box',
+        }}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return
+          const target = event.target as HTMLElement
+          if (target.dataset.thumb === '1') return
+          props.onPan(minuteAt(event.clientX) - span / 2, span)
+        }}
+      >
+        <div
+          data-thumb="1"
+          title={`${props.formatTime(props.viewStart)}–${props.formatTime(props.viewEnd)}`}
+          style={{
+            position: 'absolute',
+            left: thumbLeft,
+            top: 1,
+            width: thumbWidth,
+            height: 10,
+            borderRadius: RADIUS_CHIP,
+            background: ACCENT,
+            opacity: 0.9,
+            cursor: 'grab',
+            touchAction: 'none',
+          }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return
+            event.stopPropagation()
+            props.scrubRef.current = {
+              pointerId: event.pointerId,
+              originX: event.clientX,
+              originStart: props.viewStart,
+              span,
+            }
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }}
+          onPointerMove={(event) => {
+            const drag = props.scrubRef.current
+            if (!drag || drag.pointerId !== event.pointerId) return
+            const rect = trackRef.current?.getBoundingClientRect()
+            if (!rect || rect.width <= 0) return
+            const delta = ((event.clientX - drag.originX) / rect.width) * boundsSpan
+            props.onPan(drag.originStart + delta, drag.span)
+          }}
+          onPointerUp={(event) => {
+            if (props.scrubRef.current?.pointerId === event.pointerId) props.scrubRef.current = null
+          }}
+          onPointerCancel={() => { props.scrubRef.current = null }}
+        />
+      </div>
     </div>
   )
 }

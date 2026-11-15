@@ -15,6 +15,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import type { Context } from '@deepseek-ai/cordis'
 
+import { AsrModelRegistry } from './asr-models.ts'
+import { ModelDownloads } from './model-download.ts'
+import { MODEL_OFFERS, defaultDownloadRoot, offerMatches } from './model-catalog.ts'
+import type { AsrRuntime } from './asr-service.ts'
+import type { MinutesJobStore } from './jobs.ts'
+import { deleteSkill, readSkills, saveSkill, selectSkill } from './skills.ts'
 import { MeetingError } from './service.ts'
 import type { MeetingService } from './service.ts'
 
@@ -57,7 +63,13 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
-function dispatch(service: MeetingService, op: string, payload: Record<string, unknown>): unknown {
+function dispatch(
+  service: MeetingService,
+  jobs: MinutesJobStore | undefined,
+  asr: { models: AsrModelRegistry; runtime: AsrRuntime; downloads?: ModelDownloads } | undefined,
+  op: string,
+  payload: Record<string, unknown>,
+): unknown {
   switch (op) {
     case 'day':
       return service.dayPayload(typeof payload.day === 'string' ? payload.day : undefined)
@@ -90,9 +102,101 @@ function dispatch(service: MeetingService, op: string, payload: Record<string, u
       return service.deleteBackground(String(payload.id || ''))
     case 'backgrounds.select':
       return service.selectBackgrounds(payload.ids)
+    case 'jobs.list':
+      return { jobs: requireJobs(jobs).list() }
+    case 'jobs.start': {
+      const day = String(payload.day || '')
+      const start = Number(payload.start)
+      const end = Number(payload.end)
+      if (!day || !Number.isFinite(start) || !Number.isFinite(end)) {
+        throw new MeetingError('BAD_JOB', '缺少日期或时间区间')
+      }
+      const backgroundIds = Array.isArray(payload.backgroundIds) ? payload.backgroundIds.map((id) => String(id)) : []
+      const skillId = typeof payload.skillId === 'string' ? payload.skillId : undefined
+      const supplements = typeof payload.supplements === 'string' ? payload.supplements : undefined
+      return { job: requireJobs(jobs).start({ day, start, end, backgroundIds, ...(skillId ? { skillId } : {}), ...(supplements ? { supplements } : {}) }) }
+    }
+    case 'system.reveal':
+      return service.revealPath(payload.path)
+    case 'skills.list':
+      return readSkills(service.config.home)
+    case 'skills.save':
+      return saveSkill(service.config.home, {
+        id: typeof payload.id === 'string' ? payload.id : undefined,
+        name: typeof payload.name === 'string' ? payload.name : undefined,
+        description: typeof payload.description === 'string' ? payload.description : undefined,
+        prompt: typeof payload.prompt === 'string' ? payload.prompt : undefined,
+        select: payload.select === true,
+      })
+    case 'skills.delete':
+      return deleteSkill(service.config.home, String(payload.id || ''))
+    case 'skills.select':
+      return selectSkill(service.config.home, String(payload.id || ''))
+    case 'jobs.cancel':
+      return { job: requireJobs(jobs).cancel(String(payload.id || '')) }
+    case 'jobs.clear':
+      return { jobs: requireJobs(jobs).clearFinished() }
+    case 'sources.list':
+      return service.sources()
+    case 'models.list':
+      return modelPayload(requireAsr(asr))
+    case 'models.download':
+      return { job: requireAsr(asr).downloads?.start(String(payload.id || '')) ?? null, ...modelPayload(requireAsr(asr)) }
+    case 'models.setRoot': {
+      const root = requireAsr(asr).models.setLibrary(String(payload.path || ''))
+      return { root, ...modelPayload(requireAsr(asr)) }
+    }
+    case 'models.add': {
+      const added = requireAsr(asr).models.add(String(payload.path || ''), typeof payload.name === 'string' ? payload.name : undefined)
+      if (requireAsr(asr).runtime.status().enabled) void requireAsr(asr).runtime.start()
+      return { model: added, ...requireAsr(asr).models.list() }
+    }
+    case 'models.remove':
+      requireAsr(asr).models.remove(String(payload.id || ''))
+      return requireAsr(asr).models.list()
+    case 'models.select':
+      requireAsr(asr).models.select(String(payload.id || ''))
+      if (requireAsr(asr).runtime.status().enabled) void requireAsr(asr).runtime.start()
+      return requireAsr(asr).models.list()
+    case 'asr.status':
+      return requireAsr(asr).runtime.status()
+    case 'asr.set': {
+      const runtime = requireAsr(asr).runtime
+      if (payload.mode === 'raw' || payload.mode === 'tracks' || payload.mode === 'merged') {
+        return runtime.setMode(payload.mode)
+      }
+      if (payload.language === 'zhen' || payload.language === 'zh' || payload.language === 'en' || payload.language === 'auto') {
+        return runtime.setLanguage(payload.language)
+      }
+      if (typeof payload.enabled === 'boolean') return runtime.setEnabled(payload.enabled)
+      throw new MeetingError('BAD_ASR', '缺少 enabled 或 mode')
+    }
     default:
       throw new MeetingError('UNKNOWN_OP', `未知操作：${op || '(空)'}`)
   }
+}
+
+function modelPayload(asr: { models: AsrModelRegistry; downloads?: ModelDownloads }): Record<string, unknown> {
+  const listed = asr.models.list()
+  return {
+    ...listed,
+    defaultRoot: defaultDownloadRoot(),
+    downloads: asr.downloads?.list() ?? [],
+    offers: MODEL_OFFERS.map((offer) => ({
+      ...offer,
+      present: listed.models.some((model) => offerMatches(offer, model.path)),
+    })),
+  }
+}
+
+function requireAsr(asr: { models: AsrModelRegistry; runtime: AsrRuntime; downloads?: ModelDownloads } | undefined): { models: AsrModelRegistry; runtime: AsrRuntime; downloads?: ModelDownloads } {
+  if (!asr) throw new MeetingError('NO_ASR', 'ASR 服务还没就绪', '重启一次 DSH 后再试。')
+  return asr
+}
+
+function requireJobs(jobs: MinutesJobStore | undefined): MinutesJobStore {
+  if (!jobs) throw new MeetingError('NO_JOBS', '生成任务还没就绪', '重启一次 DSH 后再试。')
+  return jobs
 }
 
 interface RouteBridge {
@@ -109,10 +213,15 @@ function routeBridge(): RouteBridge {
   return holder[BRIDGE_KEY] as RouteBridge
 }
 
-export function registerMeetingRoutes(ctx: Context, service: MeetingService): () => void {
+export function registerMeetingRoutes(
+  ctx: Context,
+  service: MeetingService,
+  jobs?: MinutesJobStore,
+  asr?: { models: AsrModelRegistry; runtime: AsrRuntime; downloads?: ModelDownloads },
+): () => void {
   const bridge = routeBridge()
   const owner = Symbol('meeting-minutes-route')
-  bridge.handle = (op, payload) => dispatch(service, op, payload)
+  bridge.handle = (op, payload) => dispatch(service, jobs, asr, op, payload)
   bridge.owner = owner
 
   if (bridge.registered) {
