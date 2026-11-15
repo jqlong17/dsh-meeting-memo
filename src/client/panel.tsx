@@ -591,7 +591,7 @@ export function Panel(props: PanelProps) {
       day: data.day,
       file: data.filePaths?.snippets ?? `${data.root}/${data.day}/snippets.jsonl`,
       sourceLabel: source?.label ?? '当前日志',
-      segments: segments.map((segment) => ({ s: segment.s, e: segment.e, ...(segment.line ? { line: segment.line } : {}) })),
+      segments: segments.map((segment) => ({ s: segment.s, e: segment.e, ...(segment.line ? { line: segment.line } : {}), ...(segment.lines?.length ? { lines: segment.lines } : {}) })),
       selection: activeSelection,
       trackLabel: track === 'all' ? t('panel.filter.all') : t(`panel.filter.${track}`),
       filtered: track !== 'all',

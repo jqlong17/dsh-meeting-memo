@@ -12,6 +12,8 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
+import { cleanSegments } from './segment-clean.ts'
+
 export interface Segment {
   /** Start, minutes of local day (fractional). */
   s: number
@@ -20,6 +22,8 @@ export interface Segment {
   track: string
   text: string
   source?: string
+  /** 合并后保留的所有原始行号；单行时与 line 相同。 */
+  lines?: number[]
   /** 1-based physical line number in snippets.jsonl. */
   line?: number
 }
@@ -195,7 +199,7 @@ export function readDay(root: string, day: string, timeZone: string): DayData {
   }
   if (activityBad > 0) warnings.push(`activity.jsonl 有 ${activityBad} 行无法解析，已跳过`)
 
-  const segments: Segment[] = []
+  const raw: Segment[] = []
   let snippetBad = 0
   const snippetLines = readLines(snippetsFile)
   for (let lineIndex = 0; lineIndex < snippetLines.length; lineIndex += 1) {
@@ -218,7 +222,7 @@ export function readDay(root: string, day: string, timeZone: string): DayData {
     const s = clip(start.minute, 0, 1440)
     const e = clip(Math.max(endMinute, s + 0.01), s, 1440)
     const track = typeof row.track === 'string' && row.track ? row.track : 'mic'
-    segments.push({
+    raw.push({
       s,
       e,
       track,
@@ -226,17 +230,24 @@ export function readDay(root: string, day: string, timeZone: string): DayData {
       line: lineIndex + 1,
       ...(typeof row.source === 'string' && row.source ? { source: row.source } : {}),
     })
-    const minute = Math.floor(s)
-    const bucket = buckets.get(minute)
-    if (bucket) {
-      bucket.c += content.length
-      bucket.n += 1
-    } else {
-      buckets.set(minute, { m: minute, s: 0, c: content.length, n: 1 })
-    }
   }
   if (snippetBad > 0) warnings.push(`snippets.jsonl 有 ${snippetBad} 行无法解析，已跳过`)
-  segments.sort((a, b) => a.s - b.s || a.e - b.e)
+  raw.sort((a, b) => a.s - b.s || a.e - b.e)
+
+  // 处理完噪声再统计，字符数和片段数才和列表里看到的一致。
+  const cleaned = cleanSegments(raw)
+  if (cleaned.dropped > 0) warnings.push(`已跳过 ${cleaned.dropped} 条噪声转写（纯标点、孤立短词或单字母）`)
+  const segments: Segment[] = cleaned.segments
+  for (const segment of segments) {
+    const minute = Math.floor(segment.s)
+    const bucket = buckets.get(minute)
+    if (bucket) {
+      bucket.c += segment.text.length
+      bucket.n += 1
+    } else {
+      buckets.set(minute, { m: minute, s: 0, c: segment.text.length, n: 1 })
+    }
+  }
 
   // Without activity rows (old days, backfilled logs) fall back to ASR durations.
   if (activityRows === 0) {

@@ -8,8 +8,10 @@ export interface SegmentDTO {
   track: string
   text: string
   source?: string
-  /** 1-based line in snippets.jsonl. */
+  /** 1-based line in snippets.jsonl before merging. */
   line?: number
+  /** 合并后的片段可能跨多行；复制索引需要全部行号。 */
+  lines?: number[]
 }
 
 export interface BucketDTO {

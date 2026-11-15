@@ -10,6 +10,7 @@ export interface IndexSegment {
   s: number
   e: number
   line?: number
+  lines?: number[]
 }
 
 export interface IndexBackground {
@@ -66,7 +67,7 @@ export function compressLineRanges(lines: number[]): string {
 
 export function buildIndexCopy(input: BuildIndexCopyInput): string {
   const { segments } = input
-  const lines = compressLineRanges(segments.map((segment) => segment.line ?? 0))
+  const lines = compressLineRanges(segments.flatMap((segment) => segment.lines?.length ? segment.lines : [segment.line ?? 0]))
   const startMinute = segments.length ? Math.min(...segments.map((segment) => segment.s)) : null
   const endMinute = segments.length ? Math.max(...segments.map((segment) => segment.e)) : null
   const dataRange = startMinute !== null && endMinute !== null
