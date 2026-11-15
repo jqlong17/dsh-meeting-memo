@@ -18,8 +18,8 @@ dsh plugin --profile <你的 profile> add github:jqlong17/dsh-meeting-memo
 
 语音模型在「转写服务」里下载，插件会按系统给出对应选项：
 
-- **macOS**：SenseVoiceSmall_int8（苹果 Core ML，约 240 MB），走神经引擎，内存占用明显更小。
-- **其它系统**：sensevoice-small ONNX fp32（约 894 MB）。
+- **macOS**：SenseVoiceSmall_int8（苹果 Core ML，约 227 MB），走神经引擎，内存占用明显更小。
+- **其它系统**：sensevoice-small ONNX fp32（约 1 GB）。
 
 ## 面板里有什么
 

@@ -34,8 +34,8 @@ export function buildSharePrompt(version = PLUGIN_VERSION): string {
 3. 重启 DeepSeek Harness。插件只在启动时扫描一次，不重启不会出现。
 4. 按系统选语音模型，这一步由你判断，不要让我自己挑：
    - 先运行 uname -s 确认系统。
-   - 是 Darwin（macOS）：在「转写服务」里选「SenseVoiceSmall_int8 苹果 Core ML」并点下载，约 240 MB。它走 Apple 神经引擎，内存占用比通用版小一个数量级。
-   - 不是 macOS：选「sensevoice-small ONNX fp32」并点下载，约 894 MB。
+   - 是 Darwin（macOS）：在「转写服务」里选「SenseVoiceSmall_int8 苹果 Core ML」并点下载，约 227 MB。它走 Apple 神经引擎，内存占用比通用版小一个数量级。
+   - 不是 macOS：选「sensevoice-small ONNX fp32」并点下载，约 1 GB。
    - 下载由插件自己完成，不要手动往模型目录拷文件。如果「转写服务」里没有出现这两个条目，说明插件没加载成功，回到第 2 步。
    - 下载完成后在列表里点一下该模型，确认它显示「使用中」。
 5. 首次使用会申请麦克风和屏幕录制权限，请提醒我在系统设置里授权。
@@ -57,8 +57,8 @@ Do this in order and report back after each step:
 3. Restart DeepSeek Harness. Plugins are only scanned at startup.
 4. Pick the speech model for this OS — you decide, do not ask me:
    - Run uname -s first.
-   - Darwin (macOS): choose "SenseVoiceSmall_int8 苹果 Core ML" under Transcribe and download it, about 240 MB. It runs on the Apple Neural Engine and uses an order of magnitude less memory than the cross-platform build.
-   - Anything else: choose "sensevoice-small ONNX fp32", about 894 MB.
+   - Darwin (macOS): choose "SenseVoiceSmall_int8 苹果 Core ML" under Transcribe and download it, about 227 MB. It runs on the Apple Neural Engine and uses an order of magnitude less memory than the cross-platform build.
+   - Anything else: choose "sensevoice-small ONNX fp32", about 1 GB.
    - The plugin performs the download; do not copy files into the model folder by hand. If neither entry appears under Transcribe, the plugin did not load — go back to step 2.
    - When it finishes, click the model in the list and confirm it shows as in use.
 5. The first run asks for microphone and screen-recording permission on macOS; remind me to grant it.

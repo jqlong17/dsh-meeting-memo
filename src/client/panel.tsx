@@ -1126,9 +1126,7 @@ export function Panel(props: PanelProps) {
         id: localSenseVoice?.id,
         offerId: localSenseVoice ? undefined : 'sensevoice-small',
         name: 'sensevoice-small ONNX fp32',
-        meta: onnxReady
-          ? t('panel.asr.metaCross')
-          : `${t('panel.asr.metaCross')} · ${t('panel.asr.metaDownload')}`,
+        meta: `${t('panel.asr.metaCross')} · ${offer ? formatBytes(offer.bytesHint, true) : ''}`.trim(),
         badge: localSenseVoice?.id === models?.selectedId
           ? t('panel.asr.metaActive')
           : onnxPending
@@ -1143,7 +1141,7 @@ export function Panel(props: PanelProps) {
         id: coreml?.id,
         ...(coreml ? {} : coremlSuggestion ? { addPath: coremlSuggestion.path } : { offerId: 'sensevoice-coreml-int8' }),
         name: 'SenseVoiceSmall_int8 苹果 Core ML',
-        meta: coremlReady ? t('panel.asr.metaDefault') : `${t('panel.asr.metaDefault')} · ${t('panel.asr.metaDownload')}`,
+        meta: `${t('panel.asr.metaDefault')} · ${coremlOffer ? formatBytes(coremlOffer.bytesHint, true) : ''}`.trim(),
         badge: coreml?.id === models?.selectedId
           ? t('panel.asr.metaActive')
           : coremlPending
@@ -1247,7 +1245,9 @@ export function Panel(props: PanelProps) {
                     onChange={() => {
                       if (choice.id) void selectModel(choice.id)
                       else if (choice.addPath) void addModel(choice.addPath)
-                      else void downloadModel(choice.offerId ?? 'sensevoice-small')
+                      else if (choice.offerId) void downloadModel(choice.offerId)
+                      // 没有可下载的 offer 时宁可什么都不做，也绝不替用户下另一个模型。
+                      else setNoticeError(t('panel.asr.noDownload'))
                     }}
                     style={{ marginTop: 2 }}
                   />
@@ -1265,12 +1265,14 @@ export function Panel(props: PanelProps) {
             })}
           </div>
 
-          {download && download.status === 'running' ? (
-            <div style={{ ...smallStyle, marginTop: 6 }}>
-              {t('panel.asr.downloading')} {formatBytes(download.received)}
-              {download.total ? ` / ${formatBytes(download.total)}` : ''}
+          {(models?.downloads ?? []).filter((item) => item.status === 'running').map((item) => (
+            <div key={item.id} style={{ ...smallStyle, marginTop: 6 }}>
+              {t('panel.asr.downloading')} {item.name}
+              {' · '}
+              {formatBytes(item.received)}
+              {item.total ? ` / ${formatBytes(item.total)}` : ''}
             </div>
-          ) : null}
+          ))}
 
         </div>
 
