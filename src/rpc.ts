@@ -17,7 +17,7 @@ import type { Context } from '@deepseek-ai/cordis'
 
 import { AsrModelRegistry } from './asr-models.ts'
 import { ModelDownloads } from './model-download.ts'
-import { MODEL_OFFERS, defaultDownloadRoot, offerMatches } from './model-catalog.ts'
+import { defaultDownloadRoot, offerMatches, offersForPlatform } from './model-catalog.ts'
 import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
 import { deleteSkill, readSkills, saveSkill, selectSkill } from './skills.ts'
@@ -182,7 +182,7 @@ function modelPayload(asr: { models: AsrModelRegistry; downloads?: ModelDownload
     ...listed,
     defaultRoot: defaultDownloadRoot(),
     downloads: asr.downloads?.list() ?? [],
-    offers: MODEL_OFFERS.map((offer) => ({
+    offers: offersForPlatform().map((offer) => ({
       ...offer,
       present: listed.models.some((model) => offerMatches(offer, model.path)),
     })),

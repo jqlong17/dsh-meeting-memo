@@ -14,7 +14,12 @@ dsh plugin --profile <你的 profile> add github:jqlong17/dsh-meeting-memo
 
 装完**重启 DSH**：插件只在启动时扫描一次。
 
-首次使用会申请麦克风和屏幕录制权限——前者录你说的话，后者录会议另一端的声音。本地语音模型会在第一次转写时准备，需要等一会儿。
+首次使用会申请麦克风和屏幕录制权限——前者录你说的话，后者录会议另一端的声音。
+
+语音模型在「转写服务」里下载，插件会按系统给出对应选项：
+
+- **macOS**：SenseVoiceSmall_int8（苹果 Core ML，约 240 MB），走神经引擎，内存占用明显更小。
+- **其它系统**：sensevoice-small ONNX fp32（约 894 MB）。
 
 ## 面板里有什么
 

@@ -1105,6 +1105,10 @@ export function Panel(props: PanelProps) {
     const localSenseVoice = (models?.models ?? []).find((item) => item.kind === 'onnx-sensevoice') ?? null
     const coreml = (models?.models ?? []).find((item) => item.kind === 'coreml-sensevoice') ?? null
     const coremlSuggestion = models?.suggestion?.kind === 'coreml-sensevoice' && models.suggestion.ok ? models.suggestion : null
+    const coremlOffer = (models?.offers ?? []).find((item) => item.id === 'sensevoice-coreml-int8') ?? null
+    const coremlDownload = (models?.downloads ?? []).find((item) => item.id === 'sensevoice-coreml-int8') ?? null
+    const coremlReady = Boolean(coreml?.usable || coremlSuggestion || coremlOffer?.present)
+    const coremlPending = Boolean(coremlDownload && coremlDownload.status === 'running' && !coreml)
     const onnxReady = Boolean(localSenseVoice?.usable || offer?.present)
     const onnxPending = Boolean(download && download.status === 'running' && !localSenseVoice)
     const modelChoices: Array<{
@@ -1137,15 +1141,17 @@ export function Panel(props: PanelProps) {
       {
         key: 'coreml-int8',
         id: coreml?.id,
-        addPath: coreml ? undefined : coremlSuggestion?.path,
+        ...(coreml ? {} : coremlSuggestion ? { addPath: coremlSuggestion.path } : { offerId: 'sensevoice-coreml-int8' }),
         name: 'SenseVoiceSmall_int8 苹果 Core ML',
-        meta: t('panel.asr.metaDefault'),
+        meta: coremlReady ? t('panel.asr.metaDefault') : `${t('panel.asr.metaDefault')} · ${t('panel.asr.metaDownload')}`,
         badge: coreml?.id === models?.selectedId
           ? t('panel.asr.metaActive')
-          : (coreml?.usable || coremlSuggestion)
-            ? t('panel.asr.metaReady')
-            : t('panel.asr.metaUnusable'),
-        tone: coreml?.usable || coremlSuggestion || coreml?.id === models?.selectedId ? FG2 : WARN,
+          : coremlPending
+            ? t('panel.asr.downloading')
+            : coremlReady
+              ? t('panel.asr.metaReady')
+              : t('panel.asr.metaDownload'),
+        tone: coremlReady || coreml?.id === models?.selectedId ? FG2 : WARN,
       },
     ]
     return (

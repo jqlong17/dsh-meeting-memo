@@ -52,17 +52,23 @@ export class ModelDownloads {
   private async run(offer: ModelOffer, root: string, job: DownloadJob): Promise<void> {
     const staging = path.join(root, '.downloads')
     mkdirSync(staging, { recursive: true })
-    const partial = path.join(staging, `${offer.id}.partial`)
-    const archive = path.join(staging, `${offer.id}.archive`)
     try {
-      await this.curl(offer.url, partial, job)
-      renameSync(partial, archive)
-      if (offer.archive === 'file') {
-        const destDir = path.join(root, offer.folder)
-        mkdirSync(destDir, { recursive: true })
-        renameSync(archive, path.join(destDir, offer.fileName || path.basename(offer.url)))
+      if (offer.files?.length) {
+        await this.runFiles(offer, root, staging, job)
+      } else if (offer.url) {
+        const partial = path.join(staging, `${offer.id}.partial`)
+        const archive = path.join(staging, `${offer.id}.archive`)
+        await this.curl(offer.url, partial, job)
+        renameSync(partial, archive)
+        if (offer.archive === 'file') {
+          const destDir = path.join(root, offer.folder)
+          mkdirSync(destDir, { recursive: true })
+          renameSync(archive, path.join(destDir, offer.fileName || path.basename(offer.url)))
+        } else {
+          await this.extract(archive, root)
+        }
       } else {
-        await this.extract(archive, root)
+        throw new Error('这个模型没有下载地址')
       }
       job.status = 'done'
       job.message = '已下载到模型目录'
@@ -70,6 +76,26 @@ export class ModelDownloads {
       job.status = 'failed'
       job.message = error instanceof Error ? error.message : String(error)
     }
+  }
+
+  /** 多文件分发：逐个抓到同名目录，最后一起算进度。 */
+  private async runFiles(offer: ModelOffer, root: string, staging: string, job: DownloadJob): Promise<void> {
+    const files = offer.files ?? []
+    const dest = path.join(root, offer.folder)
+    mkdirSync(dest, { recursive: true })
+    let finished = 0
+    for (const file of files) {
+      const target = path.join(dest, file.path)
+      mkdirSync(path.dirname(target), { recursive: true })
+      const partial = path.join(staging, `${offer.id}-${finished}.partial`)
+      await this.curl(file.url, partial, job)
+      renameSync(partial, target)
+      finished += 1
+      job.received = Math.round((finished / files.length) * (offer.bytesHint || 0))
+      job.message = `正在下载 ${finished}/${files.length}`
+    }
+    job.total = offer.bytesHint
+    job.received = offer.bytesHint
   }
 
   private curl(url: string, dest: string, job: DownloadJob): Promise<void> {
