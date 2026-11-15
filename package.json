@@ -40,7 +40,7 @@
     "build:client": "node ./scripts/build-client.mjs",
     "check:client": "node ./scripts/check-client.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "prepack": "npm run build"
+    "prepare": "npm run build"
   },
   "files": [
     "src",
