@@ -1970,8 +1970,18 @@ export function Panel(props: PanelProps) {
                 {t('panel.transcript.count').replace('{n}', String(segments.length)).replace('{chars}', numberText(segmentChars))}
               </span>
               <span style={{ flex: '1 1 auto' }} />
-              <button type="button" style={buttonStyle} onClick={() => void loadDay(data.day, false)}>
-                {t('panel.refresh')}
+              <button
+                type="button"
+                style={{
+                  ...buttonStyle,
+                  ...(followLatest ? {} : { borderColor: ACCENT, color: ACCENT }),
+                }}
+                onClick={() => {
+                  setFollowLatest(true)
+                  if (listRef.current) listRef.current.scrollTop = 0
+                }}
+              >
+                {t('panel.jumpLatest')}
               </button>
               <button
                 type="button"
@@ -2270,21 +2280,6 @@ export function Panel(props: PanelProps) {
             ))}
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 6, flex: '0 0 auto' }}>
-            {tab === 'today' ? (
-              <button
-                type="button"
-                style={{
-                  ...buttonStyle,
-                  ...(followLatest ? {} : { borderColor: ACCENT, color: ACCENT }),
-                }}
-                onClick={() => {
-                  setFollowLatest(true)
-                  if (listRef.current) listRef.current.scrollTop = 0
-                }}
-              >
-                {t('panel.jumpLatest')}
-              </button>
-            ) : null}
             <button
               type="button"
               style={buttonStyle}
