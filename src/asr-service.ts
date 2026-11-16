@@ -371,7 +371,7 @@ export class AsrRuntime {
     if (!this.embedModel) return
     const vector = decodeEmbedding(emb)
     if (!vector) return
-    const set = this.centroidsFor(day, device)
+    const set = this.centroidsFor(day, device, track)
     if (!set.centroids.size) return
     const hit = matchSpeaker(vector, set)
     if (!hit) return
@@ -388,17 +388,21 @@ export class AsrRuntime {
     }
   }
 
-  private centroidsFor(day: string, device: string): CentroidSet {
+  private centroidsFor(day: string, device: string, track: string): CentroidSet {
     let stamp = ''
     try {
       stamp = String(statSync(path.join(this.home, 'speaker-labels.json')).mtimeMs)
     } catch {
       stamp = '0'
     }
-    const key = `${day}:${device}:${stamp}`
+    const key = `${day}:${track}:${device}:${stamp}`
     if (this.centroids && this.centroidsKey === key) return this.centroids
     const labels = readLabels(this.home).filter((label) => label.day === day)
-    this.centroids = buildCentroids(this.logRoot(), day, labels, this.home, device || undefined)
+    this.centroids = buildCentroids(
+      this.logRoot(), day, labels, this.home,
+      track === 'mic' ? (device || undefined) : undefined,
+      track,
+    )
     this.centroidsKey = key
     return this.centroids
   }

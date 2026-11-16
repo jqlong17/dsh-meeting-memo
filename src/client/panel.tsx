@@ -714,11 +714,16 @@ export function Panel(props: PanelProps) {
   const rowKey = (segment: { line?: number; lines?: number[]; s: number; e: number }): string =>
     String(segment.line ?? segment.lines?.[0] ?? `${segment.s}-${segment.e}`)
 
-  /** 选区内的句子默认全选，边删边留即可。 */
+  /**
+   * 选区内的句子默认全选，但只勾当前轨道筛选下看得到的那些：
+   * 选「麦克风」时就不会把同时段的系统声音（别人说话）一起勾进来。
+   */
   const pickRowsInRange = (start: number, end: number) => {
     const from = Math.min(start, end)
     const to = Math.max(start, end)
-    const rows = (data?.segments ?? []).filter((segment) => segment.e > from && segment.s < to)
+    const rows = (data?.segments ?? []).filter((segment) => (
+      segment.e > from && segment.s < to && (track === 'all' || segment.track === track)
+    ))
     setSpkPicked(rows.map((segment) => rowKey(segment)))
   }
 

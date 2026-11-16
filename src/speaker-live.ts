@@ -176,6 +176,8 @@ export function buildCentroids(
   home?: string,
   /** 只统计这个设备录的样本：换麦克风后声纹会明显掉分，混在一起就会谁都认不出。 */
   device?: string,
+  /** 只看这条轨道的样本：麦克风是近讲、系统声音是回环，混在一起质心会飘。 */
+  track?: string,
 ): CentroidSet {
   const centroids = new Map<string, Vector>()
   let samples = 0
@@ -184,14 +186,20 @@ export function buildCentroids(
 
   const byLine = new Map<number, Vector>()
   const audioByLine = new Map<number, string>()
+  const trackByLine = new Map<number, string>()
   let index = 0
   for (const raw of readFileSync(file, 'utf8').split('\n')) {
     if (!raw.trim()) continue
     index += 1
-    let row: { emb?: unknown; audio?: unknown; input?: unknown }
+    let row: { emb?: unknown; audio?: unknown; input?: unknown; track?: unknown }
     try {
-      row = JSON.parse(raw) as { emb?: unknown; audio?: unknown; input?: unknown }
+      row = JSON.parse(raw) as { emb?: unknown; audio?: unknown; input?: unknown; track?: unknown }
     } catch {
+      continue
+    }
+    if (typeof row.track === 'string') trackByLine.set(index, row.track)
+    if (track && row.track !== track) {
+      if (typeof row.audio === 'string') audioByLine.set(index, row.audio)
       continue
     }
     if (device && (typeof row.input !== 'string' || row.input !== device)) {
@@ -211,6 +219,7 @@ export function buildCentroids(
     for (const label of labels) {
       for (const line of label.lines ?? []) {
         if (byLine.has(line)) continue
+        if (track && trackByLine.get(line) !== track) continue
         const audio = audioByLine.get(line)
         if (audio) needs.push({ key: `${day}:${line}`, audio })
       }
