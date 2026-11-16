@@ -50,48 +50,106 @@ window.__MT__ = {{TOKEN}};
 
   var tl = document.getElementById('tl');
   if (!tl) return;
+  var plot = document.getElementById('plot');
+  var svg = document.getElementById('tlSvg');
   var sel = document.getElementById('sel');
+  var ticks = document.getElementById('ticks');
   var label = document.getElementById('selText');
   var rows = Array.prototype.slice.call(document.querySelectorAll('.row'));
   var more = document.getElementById('more');
-  var dayStart = parseFloat(tl.dataset.start);
-  var dayEnd = parseFloat(tl.dataset.end);
+  var model = window.__MM__ || { start: 0, end: 1440, buckets: [] };
+  var dayStart = model.start;
+  var dayEnd = model.end;
+  var points = model.buckets;
+  var view = { s: dayStart, e: dayEnd };
   var range = null;
   var dragging = false;
-  var anchorMinute = 0;
   var moved = false;
+  var anchorMinute = 0;
+  var pinchStart = null;
+
+  var MIN_SPAN = 10;
 
   function clock(minute) {
     var m = Math.max(0, Math.min(1440, minute));
     return ('0' + Math.floor(m / 60)).slice(-2) + ':' + ('0' + Math.round(m % 60)).slice(-2);
   }
 
+  function plotRect() { return plot.getBoundingClientRect(); }
+
   function minuteAt(clientX) {
-    var rect = tl.getBoundingClientRect();
+    var rect = plotRect();
     var ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    return dayStart + ratio * (dayEnd - dayStart);
+    return view.s + ratio * (view.e - view.s);
+  }
+
+  function tickStep() {
+    var span = view.e - view.s;
+    if (span <= 60) return 10;
+    if (span <= 180) return 30;
+    if (span <= 480) return 60;
+    return 180;
+  }
+
+  // 柱子按当前可视窗口重画：数据是按分钟的，缩到多细都不会糊。
+  function drawBars() {
+    var span = Math.max(0.001, view.e - view.s);
+    var width = 1000;
+    var height = 120;
+    var bin = Math.max(1, span / 240);
+    var sums = new Array(240).fill(0);
+    for (var i = 0; i < points.length; i += 1) {
+      var minute = points[i][0];
+      if (minute < view.s || minute >= view.e) continue;
+      var index = Math.min(239, Math.floor(((minute - view.s) / span) * 240));
+      sums[index] += points[i][1];
+    }
+    var out = [];
+    for (var j = 0; j < 240; j += 1) {
+      if (sums[j] <= 0) continue;
+      var density = Math.min(1, sums[j] / (bin * 60));
+      var h = Math.max(2, density * (height - 4));
+      out.push('<rect x="' + (j * (width / 240)).toFixed(1) + '" y="' + (height - h).toFixed(1)
+        + '" width="' + Math.max(1, width / 240 - 1).toFixed(1) + '" height="' + h.toFixed(1)
+        + '" rx="1" fill="#4176e6" opacity="' + (0.3 + density * 0.65).toFixed(2) + '"/>');
+    }
+    svg.innerHTML = out.join('');
+  }
+
+  // 刻度是 HTML，不是 SVG——SVG 横向拉伸会把字压变形，边缘还会被裁掉。
+  function drawTicks() {
+    var step = tickStep();
+    var first = Math.ceil(view.s / step) * step;
+    var parts = [];
+    for (var minute = first; minute <= view.e; minute += step) {
+      var percent = ((minute - view.s) / Math.max(0.001, view.e - view.s)) * 100;
+      var align = percent < 6 ? 'start' : percent > 94 ? 'end' : 'center';
+      parts.push('<span style="left:' + percent.toFixed(2) + '%;transform:translateX('
+        + (align === 'start' ? '0' : align === 'end' ? '-100%' : '-50%')
+        + ')">' + clock(minute) + '</span>');
+    }
+    ticks.innerHTML = parts.join('');
   }
 
   function apply() {
+    drawBars();
+    drawTicks();
     if (!range) {
       sel.style.display = 'none';
       rows.forEach(function (row) { row.style.display = ''; });
-      var shown = rows.length;
-      label.textContent = '全天 · ' + shown + ' 条';
+      label.textContent = '全天 · ' + rows.length + ' 条';
       if (more) more.style.display = '';
       return;
     }
     var start = Math.min(range.s, range.e);
     var end = Math.max(range.s, range.e);
-    var span = Math.max(0.001, dayEnd - dayStart);
+    var span = Math.max(0.001, view.e - view.s);
     sel.style.display = 'block';
-    sel.style.left = ((start - dayStart) / span) * 100 + '%';
-    sel.style.width = ((end - start) / span) * 100 + '%';
+    sel.style.left = Math.max(0, ((start - view.s) / span) * 100) + '%';
+    sel.style.width = Math.max(0, ((Math.min(end, view.e) - Math.max(start, view.s)) / span) * 100) + '%';
     var count = 0;
     rows.forEach(function (row) {
-      var rs = parseFloat(row.dataset.s);
-      var re = parseFloat(row.dataset.e);
-      var hit = re > start && rs < end;
+      var hit = parseFloat(row.dataset.e) > start && parseFloat(row.dataset.s) < end;
       row.style.display = hit ? '' : 'none';
       if (hit) count += 1;
     });
@@ -99,20 +157,31 @@ window.__MT__ = {{TOKEN}};
     if (more) more.style.display = 'none';
   }
 
+  function zoom(factor) {
+    var center = range ? (range.s + range.e) / 2 : (view.s + view.e) / 2;
+    var span = Math.max(MIN_SPAN, Math.min(dayEnd - dayStart, (view.e - view.s) * factor));
+    var s = Math.max(dayStart, center - span / 2);
+    var e = Math.min(dayEnd, s + span);
+    view = { s: e - span <= dayStart ? dayStart : Math.min(s, dayEnd - span), e: Math.min(dayEnd, e) };
+    if (view.e - view.s < MIN_SPAN) view = { s: dayStart, e: dayEnd };
+    apply();
+  }
+
   function onDown(event) {
     if (!event.isPrimary) return;
+    if (event.pointerType === 'touch' && pinchStart) return;
     dragging = true;
     moved = false;
     anchorMinute = minuteAt(event.clientX);
     range = { s: anchorMinute, e: anchorMinute };
-    tl.setPointerCapture(event.pointerId);
+    try { plot.setPointerCapture(event.pointerId); } catch (err) {}
     apply();
   }
 
   function onMove(event) {
     if (!dragging || !event.isPrimary) return;
     var minute = minuteAt(event.clientX);
-    if (Math.abs(minute - anchorMinute) >= 0.5) moved = true;
+    if (Math.abs(minute - anchorMinute) > (view.e - view.s) / 200) moved = true;
     range = { s: anchorMinute, e: minute };
     apply();
     event.preventDefault();
@@ -121,32 +190,65 @@ window.__MT__ = {{TOKEN}};
   function onUp(event) {
     if (!dragging) return;
     dragging = false;
-    try { tl.releasePointerCapture(event.pointerId); } catch (e) {}
-    if (!moved) {
-      // 只是点了一下：保留原选区，不误触
-      if (range && range.s === range.e) { range = null; apply(); }
-    } else if (range) {
-      var start = Math.round(Math.min(range.s, range.e));
-      var end = Math.round(Math.max(range.s, range.e));
-      range = end - start >= 1 ? { s: start, e: end } : null;
-      apply();
-    }
+    try { plot.releasePointerCapture(event.pointerId); } catch (err) {}
+    if (!moved) { range = null; apply(); return; }
+    var start = Math.round(Math.min(range.s, range.e));
+    var end = Math.round(Math.max(range.s, range.e));
+    range = end - start >= 1 ? { s: start, e: end } : null;
+    apply();
   }
 
-  tl.addEventListener('pointerdown', onDown);
-  tl.addEventListener('pointermove', onMove);
-  tl.addEventListener('pointerup', onUp);
-  tl.addEventListener('pointercancel', onUp);
+  plot.addEventListener('pointerdown', onDown);
+  plot.addEventListener('pointermove', onMove);
+  plot.addEventListener('pointerup', onUp);
+  plot.addEventListener('pointercancel', onUp);
+
+  // 双指捏合缩放
+  plot.addEventListener('touchstart', function (event) {
+    if (event.touches.length !== 2) return;
+    dragging = false;
+    range = null;
+    var a = event.touches[0].clientX;
+    var b = event.touches[1].clientX;
+    pinchStart = { distance: Math.abs(a - b), span: view.e - view.s, center: minuteAt((a + b) / 2) };
+  }, { passive: true });
+
+  plot.addEventListener('touchmove', function (event) {
+    if (!pinchStart || event.touches.length !== 2) return;
+    var a = event.touches[0].clientX;
+    var b = event.touches[1].clientX;
+    var distance = Math.max(12, Math.abs(a - b));
+    var span = Math.max(MIN_SPAN, Math.min(dayEnd - dayStart, pinchStart.span * (pinchStart.distance / distance)));
+    var s = Math.max(dayStart, pinchStart.center - span / 2);
+    var e = Math.min(dayEnd, s + span);
+    view = { s: Math.min(s, e - span), e: e };
+    if (view.e - view.s < MIN_SPAN) view = { s: dayStart, e: dayEnd };
+    drawBars();
+    drawTicks();
+    event.preventDefault();
+  }, { passive: false });
+
+  plot.addEventListener('touchend', function (event) {
+    if (event.touches.length < 2) pinchStart = null;
+    apply();
+  }, { passive: true });
+
+  document.querySelectorAll('[data-zoom]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      zoom(button.dataset.zoom === 'in' ? 0.55 : 1 / 0.55);
+    });
+  });
 
   document.querySelectorAll('[data-quick]').forEach(function (button) {
     button.addEventListener('click', function () {
-      var kind = button.dataset.quick;
-      if (kind === 'all') {
+      if (button.dataset.quick === 'all') {
+        view = { s: dayStart, e: dayEnd };
         range = null;
       } else {
         var now = new Date();
         var minute = now.getHours() * 60 + now.getMinutes();
         range = { s: Math.max(dayStart, minute - 120), e: Math.min(dayEnd, minute) };
+        view = { s: Math.max(dayStart, minute - 150), e: Math.min(dayEnd, minute + 30) };
       }
       apply();
     });

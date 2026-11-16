@@ -113,35 +113,25 @@ function renderItems(items: MobileItem[]): string {
   return parts.join('\n')
 }
 
-/** 今日的密度时间轴，服务端直出，不依赖前端脚本。 */
+/**
+ * 今日的密度时间轴。
+ *
+ * 柱子和刻度确实需要跟着缩放变，所以这里只负责把「每分钟的语音秒数」交给前端，
+ * 由页面脚本按可视窗口绘制——仍然不请求服务端，数据在 HTML 里。
+ */
 function renderTimeline(buckets: Array<{ m: number; s: number }>, windowStart: number, windowEnd: number): string {
-  const bin = 5
-  const span = Math.max(bin, windowEnd - windowStart)
-  const count = Math.ceil(span / bin)
-  const sums = new Array<number>(count).fill(0)
-  for (const bucket of buckets) {
-    if (bucket.m < windowStart || bucket.m >= windowEnd) continue
-    const index = Math.min(count - 1, Math.floor((bucket.m - windowStart) / bin))
-    sums[index] += Math.max(0, bucket.s)
-  }
-  const width = 1000
-  const height = 120
-  const barWidth = width / count
-  const bars = sums.map((seconds, index) => {
-    const density = Math.min(1, seconds / (bin * 60))
-    const h = Math.max(1, density * (height - 6))
-    const x = index * barWidth
-    return `<rect x="${x.toFixed(1)}" y="${(height - h).toFixed(1)}" width="${Math.max(0.8, barWidth - 0.8).toFixed(1)}" height="${h.toFixed(1)}" rx="1" fill="#4176e6" opacity="${(0.25 + density * 0.7).toFixed(2)}"/>`
-  }).join('')
-  const ticks: string[] = []
-  for (let minute = Math.ceil(windowStart / 180) * 180; minute <= windowEnd; minute += 180) {
-    const x = ((minute - windowStart) / span) * width
-    const label = `${String(Math.floor(minute / 60)).padStart(2, '0')}:00`
-    ticks.push(`<text x="${x.toFixed(1)}" y="${height + 14}" font-size="20" fill="#8e8e93" text-anchor="middle">${label}</text>`)
-  }
+  const points = buckets
+    .filter((bucket) => bucket.m >= windowStart && bucket.m < windowEnd && bucket.s > 0)
+    .map((bucket) => [bucket.m, Math.round(bucket.s * 10) / 10])
+  const data = JSON.stringify({ start: windowStart, end: windowEnd, buckets: points })
   return `<div class="timeline" id="tl" data-start="${windowStart}" data-end="${windowEnd}">`
-    + `<svg viewBox="0 0 ${width} ${height + 20}" width="100%" height="110" preserveAspectRatio="none">${bars}${ticks.join('')}</svg>`
-    + '<div class="sel" id="sel"></div></div>'
+    + '<div class="plot" id="plot">'
+    + '<svg id="tlSvg" viewBox="0 0 1000 120" width="100%" height="120" preserveAspectRatio="none"></svg>'
+    + '<div class="sel" id="sel"></div>'
+    + '</div>'
+    + '<div class="ticks" id="ticks"></div>'
+    + '</div>'
+    + `<script>window.__MM__ = ${data};</script>`
 }
 
 /** 倒序转写：最新的在最前，带时间、说话人和正文。 */
@@ -255,6 +245,8 @@ export function registerMobile(ctx: Context, service: MeetingService): () => voi
             + renderTimeline(payload.buckets, payload.window.start, payload.window.end)
             + '<div class="tl-bar">'
             + '<span id="selText"></span>'
+            + '<button type="button" data-zoom="in" aria-label="放大">＋</button>'
+            + '<button type="button" data-zoom="out" aria-label="缩小">－</button>'
             + '<button type="button" data-quick="last2h">最近 2 小时</button>'
             + '<button type="button" data-quick="all">全天</button>'
             + '</div>'
