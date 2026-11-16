@@ -361,11 +361,6 @@ export class AsrRuntime {
     const args = external
       ? ['capture', '--engine', 'external', '--audio', audio, '--mode', this.persisted.mode, '--language', this.persisted.language, ...inputArgs]
       : ['capture', '--model', model.path, '--mode', this.persisted.mode, '--language', this.persisted.language, ...(this.persisted.mode === 'raw' ? ['--audio', audio] : []), ...inputArgs]
-    try {
-      writeFileSync(pidFile(this.home), String(child.pid ?? ''), 'utf8')
-    } catch {
-      // 记不下来不影响采集
-    }
     const generation = ++this.generation
     this.runningModelId = model.id
     this.memory = []
@@ -373,6 +368,11 @@ export class AsrRuntime {
     this.watchMemory()
     const child = spawn(helper, args, { stdio: ['ignore', 'pipe', 'pipe'] })
     this.child = child
+    try {
+      writeFileSync(pidFile(this.home), String(child.pid ?? ''), 'utf8')
+    } catch {
+      // 记不下来不影响采集
+    }
     this.startedAt = new Date().toISOString()
     this.buffer = ''
     this.lastEventAt = Date.now()
