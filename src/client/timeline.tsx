@@ -117,7 +117,7 @@ export function TimelineChart(props: TimelineChartProps) {
     intervalsLabel,
     now,
     binMinutes = 5,
-    height = 196,
+    height = 150,
     labels,
     formatTime,
     onDraft,
@@ -437,20 +437,36 @@ export function TimelineChart(props: TimelineChartProps) {
           )
         })}
 
-        <text x={selX} y={PADDING.top - 8} fontSize={FS.xs} fill={FG} fontFamily={MONO} pointerEvents="none">
-          {formatTime(selStart)}
-        </text>
-        <text
-          x={selX + selW}
-          y={PADDING.top - 8}
-          fontSize={FS.xs}
-          fill={FG}
-          fontFamily={MONO}
-          textAnchor="end"
-          pointerEvents="none"
-        >
-          {formatTime(selEnd)}
-        </text>
+        {selW < 120 ? (
+          <text
+            x={selX + selW / 2}
+            y={PADDING.top - 8}
+            fontSize={FS.xs}
+            fill={FG}
+            fontFamily={MONO}
+            textAnchor="middle"
+            pointerEvents="none"
+          >
+            {formatTime(selStart)}–{formatTime(selEnd)}
+          </text>
+        ) : (
+          <>
+            <text x={selX} y={PADDING.top - 8} fontSize={FS.xs} fill={FG} fontFamily={MONO} pointerEvents="none">
+              {formatTime(selStart)}
+            </text>
+            <text
+              x={selX + selW}
+              y={PADDING.top - 8}
+              fontSize={FS.xs}
+              fill={FG}
+              fontFamily={MONO}
+              textAnchor="end"
+              pointerEvents="none"
+            >
+              {formatTime(selEnd)}
+            </text>
+          </>
+        )}
 
         {hourTicks.map((minute, index) => {
           const even = (minute / 60) % labelEvery === 0
@@ -484,9 +500,11 @@ export function TimelineChart(props: TimelineChartProps) {
               strokeDasharray="3 3"
               opacity={0.75}
             />
-            <text x={xOf(now) + 3} y={PADDING.top + 9} fontSize={FS.xs} fill={ACCENT}>
-              {labels.now}
-            </text>
+            {Math.abs(xOf(now) - (selX + selW)) > 46 ? (
+              <text x={xOf(now) + 3} y={PADDING.top + 9} fontSize={FS.xs} fill={ACCENT}>
+                {labels.now}
+              </text>
+            ) : null}
           </g>
         ) : null}
 
