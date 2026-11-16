@@ -1347,7 +1347,7 @@ export function Panel(props: PanelProps) {
                 key={key}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '18px 62px 48px 92px minmax(0, 1fr)',
+                  gridTemplateColumns: '18px 62px 48px 116px minmax(0, 1fr)',
                   columnGap: 8,
                   alignItems: 'start',
                   padding: '5px 0',
@@ -1998,7 +1998,7 @@ export function Panel(props: PanelProps) {
                   key={`${segment.s}-${index}`}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '62px 48px 92px minmax(0, 1fr)',
+                    gridTemplateColumns: '62px 48px 116px minmax(0, 1fr)',
                     columnGap: 8,
                     alignItems: 'start',
                     padding: '5px 0',
@@ -2710,6 +2710,9 @@ function SpeakerChip({ name, score }: { name: string; score?: number }): ReactEl
       }}
     >
       {name ? shortSpeaker(name) : '—'}
+      {name && typeof score === 'number' ? (
+        <span style={{ opacity: 0.7, marginLeft: 3 }}>{score.toFixed(2)}</span>
+      ) : null}
     </span>
   )
 }
