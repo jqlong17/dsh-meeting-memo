@@ -1134,15 +1134,19 @@ export function Panel(props: PanelProps) {
     const visible = backgrounds.filter((card) => bgFilterTags.length === 0 || bgFilterTags.some((tag) => card.tags.includes(tag)))
     return (
       <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
-        <div style={{ ...smallStyle, lineHeight: 1.55, marginBottom: 6 }}>{t('panel.background.hint')}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7, flexWrap: 'wrap' }}>
-          <button type="button" style={primaryButtonStyle} onClick={startAddBackground}>{t('panel.background.add')}</button>
-          {bgLoading ? <span style={smallStyle}>{t('panel.loading')}</span> : null}
-          <span style={{ flex: '1 1 auto' }} />
-          {bgSelection.length ? (
-            <span style={{ ...smallStyle, color: ACCENT }}>{t('panel.generate.count').replace('{n}', String(bgSelection.length))}</span>
-          ) : null}
-        </div>
+        <PageHeader
+          title={t('panel.tab.background')}
+          meta={bgSelection.length
+            ? `${t('panel.generate.count').replace('{n}', String(bgSelection.length))} · ${t('panel.background.total').replace('{n}', String(backgrounds.length))}`
+            : t('panel.background.total').replace('{n}', String(backgrounds.length))}
+          hint={t('panel.background.hint')}
+          actions={(
+            <>
+              {bgLoading ? <span style={smallStyle}>{t('panel.loading')}</span> : null}
+              <button type="button" style={primaryButtonStyle} onClick={startAddBackground}>{t('panel.background.add')}</button>
+            </>
+          )}
+        />
         {bgError ? renderError(bgError, () => void loadBackgrounds()) : null}
         {renderNotices()}
         {bgEditing && !bgEditing.id ? renderBackgroundEditor(bgEditing) : null}
@@ -1726,13 +1730,16 @@ export function Panel(props: PanelProps) {
     const finished = jobs.some((job) => job.status !== 'queued' && job.status !== 'running')
     return (
       <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
-        <div style={{ ...smallStyle, lineHeight: 1.55, marginBottom: 6 }}>{t('panel.jobs.hint')}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-          <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.jobs.title')}</span>
-          <span style={smallStyle}>{active ? `${active} ${t('panel.jobs.active')}` : t('panel.jobs.idle')}</span>
-          <span style={{ flex: '1 1 auto' }} />
-          <button type="button" style={buttonStyle} disabled={!finished} onClick={() => void clearFinishedJobs()}>{t('panel.jobs.clear')}</button>
-        </div>
+        <PageHeader
+          title={t('panel.jobs.title')}
+          meta={active ? `${active} ${t('panel.jobs.active')}` : t('panel.jobs.idle')}
+          hint={t('panel.jobs.hint')}
+          actions={(
+            <button type="button" style={buttonStyle} disabled={!finished} onClick={() => void clearFinishedJobs()}>
+              {t('panel.jobs.clear')}
+            </button>
+          )}
+        />
         {jobs.length === 0 ? (
           <div style={{ ...smallStyle, lineHeight: 1.6 }}>{t('panel.jobs.empty')}</div>
         ) : jobs.map((job) => (
@@ -2069,12 +2076,39 @@ export function Panel(props: PanelProps) {
     )
   }
 
+  /** 纪要页的页头：标题 + 场次 + 范围切换，和「背景」「任务」保持同一种结构。 */
+  const minutesHeader = () => (
+    <PageHeader
+      title={t('panel.tab.minutes')}
+      meta={minutesMode === 'day'
+        ? ` ${minutes?.day ?? ''}`
+        : t('panel.minutes.range.count').replace('{n}', String(minutesRange?.total ?? 0))}
+      actions={(['week', 'all', 'day'] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          style={{
+            ...buttonStyle,
+            ...(minutesMode === mode ? { borderColor: ACCENT, color: ACCENT, background: ACCENT_SOFT } : {}),
+          }}
+          onClick={() => {
+            setMinutesMode(mode)
+            if (mode === 'day' && data) void loadMinutes(data.day)
+          }}
+        >
+          {t(`panel.minutes.range.${mode}`)}
+        </button>
+      ))}
+    />
+  )
+
   const renderMinutes = () => {
     const sessions = minutes?.sessions ?? []
     if (minutesMode !== 'day') {
       const groups = minutesRange?.groups ?? []
       return (
         <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
+          {minutesHeader()}
           {renderNotices()}
           {groups.length === 0 ? (
             <div style={{ ...smallStyle, lineHeight: 1.6, padding: '6px 0' }}>
@@ -2142,6 +2176,7 @@ export function Panel(props: PanelProps) {
     }
     return (
       <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
+        {minutesHeader()}
         {renderNotices()}
         {minutesError ? renderError(minutesError, () => { if (data) void loadMinutes(data.day) }) : null}
         {minutesLoading && !minutes ? <div style={{ ...smallStyle, padding: '6px 0' }}>{t('panel.loading')}</div> : null}
@@ -2269,32 +2304,6 @@ export function Panel(props: PanelProps) {
             <span style={{ ...smallStyle, fontFamily: MONO }} title={t('panel.version')}>{PLUGIN_VERSION}</span>
           </div>
         </div>
-        {tab === 'minutes' ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-            <span style={{ ...smallStyle }}>{t('panel.minutes.range')}</span>
-            {(['week', 'all', 'day'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                style={{
-                  ...buttonStyle,
-                  ...(minutesMode === mode ? { borderColor: ACCENT, color: ACCENT, background: ACCENT_SOFT } : {}),
-                }}
-                onClick={() => {
-                  setMinutesMode(mode)
-                  if (mode === 'day' && data) void loadMinutes(data.day)
-                }}
-              >
-                {t(`panel.minutes.range.${mode}`)}
-              </button>
-            ))}
-            {minutesMode !== 'day' && minutesRange ? (
-              <span style={{ ...smallStyle, marginLeft: 'auto' }}>
-                {t('panel.minutes.range.count').replace('{n}', String(minutesRange.total))}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
         {tab === 'today' || (tab === 'minutes' && minutesMode === 'day') ? (
           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5, marginTop: 6 }}>
             <span style={{ marginRight: 'auto' }} />
@@ -2695,6 +2704,33 @@ function shortSpeaker(name: string): string {
 }
 
 /** 转写行里的「说话人」标签，今日和说话人识别共用。 */
+
+/**
+ * 三个内容页共用的页头：左边标题 + 说明，右边操作。
+ * 之前各页各写一套，间距和基线都不一样，对齐看着发飘。
+ */
+function PageHeader(props: {
+  title: string
+  meta?: string
+  actions?: ReactNode
+  hint?: string
+  extra?: ReactNode
+}): ReactElement {
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 26 }}>
+        <span style={{ fontSize: FS.sm, fontWeight: 600, flex: '0 0 auto' }}>{props.title}</span>
+        {props.meta ? <span style={{ ...smallStyle, flex: '1 1 auto', minWidth: 0 }}>{props.meta}</span> : <span style={{ flex: '1 1 auto' }} />}
+        {props.actions ? <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>{props.actions}</div> : null}
+      </div>
+      {props.extra}
+      {props.hint ? (
+        <div style={{ ...smallStyle, lineHeight: 1.55, marginTop: 4 }}>{props.hint}</div>
+      ) : null}
+    </div>
+  )
+}
+
 function SpeakerChip({ name, score }: { name: string; score?: number }): ReactElement {
   return (
     <span
