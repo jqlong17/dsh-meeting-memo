@@ -267,23 +267,16 @@ async function dispatch(
         day: group.day,
         items: group.items.map((item) => {
           let audioCount = root ? countAudio(root, item.day, item.start, item.end, service.config.timeZone) : 0
-          if (root && item.lines?.length) {
-            const wanted = new Set(item.lines)
-            const day = (() => {
-              try {
-                return service.dayPayload(item.day)
-              } catch {
-                return null
-              }
-            })()
-            if (day) {
-              const exact = day.segments.filter((segment) => (
-                (segment.lines ?? (segment.line ? [segment.line] : [])).some((line) => wanted.has(line))
-              )).filter((segment) => Boolean(segment.audio)).length
-              audioCount = exact
-            }
+          let samples = 0
+          if (item.lines?.length) {
+            // 声纹才是匹配要用的东西：按行数有 emb 的条数，别再让人误以为「0 音频 = 没数据」
+            const flags = snippetFlags(service.config.home, item.day)
+            const picked = item.lines
+            samples = picked.filter((line) => flags.get(line)?.emb).length
+            const withAudio = picked.filter((line) => flags.get(line)?.audio).length
+            if (withAudio) audioCount = withAudio
           }
-          return { ...item, audioCount }
+          return { ...item, audioCount, samples }
         }),
       }))
       return { groups, total: items.length, audioOn: Boolean(asr?.runtime.status().mode === 'raw') }
@@ -393,6 +386,39 @@ function routeBridge(): RouteBridge {
   return holder[BRIDGE_KEY] as RouteBridge
 }
 
+
+
+/** 当天的每一行有没有声纹、有没有 wav；标签列表据此显示「可用样本」。 */
+function snippetFlags(home: string, day: string): Map<number, { emb: boolean; audio: boolean }> {
+  const flags = new Map<number, { emb: boolean; audio: boolean }>()
+  // 老片段没有 emb 字段，但可能已经从 wav 补算进缓存，同样算可用样本
+  let cache: Record<string, string> = {}
+  try {
+    cache = JSON.parse(readFileSync(path.join(home, 'emb-cache.json'), 'utf8')) as Record<string, string>
+  } catch {
+    cache = {}
+  }
+  try {
+    const text = readFileSync(path.join(home, 'asr-log', day, 'snippets.jsonl'), 'utf8')
+    let index = 0
+    for (const raw of text.split('\n')) {
+      if (!raw.trim()) continue
+      index += 1
+      try {
+        const row = JSON.parse(raw) as { emb?: unknown; audio?: unknown }
+        flags.set(index, {
+          emb: (typeof row.emb === 'string' && row.emb.length > 0) || Boolean(cache[`${day}:${index}`]),
+          audio: typeof row.audio === 'string' && row.audio.length > 0,
+        })
+      } catch {
+        // 坏行跳过
+      }
+    }
+  } catch {
+    // 没有日志就是空
+  }
+  return flags
+}
 
 /** 数某天某段区间落了多少个 wav（文件名就是毫秒时间戳）。 */
 function countAudio(root: string, day: string, start: number, end: number, timeZone: string): number {

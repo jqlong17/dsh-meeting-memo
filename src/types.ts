@@ -233,6 +233,8 @@ export interface SpeakerLabelDTO {
   source?: 'live' | 'batch'
   /** 这段时间里落了多少个 wav。 */
   audioCount?: number
+  /** 这条标签有多少句带声纹样本（实时匹配真正用到的）。 */
+  samples?: number
 }
 
 export interface SpeakerPayload {

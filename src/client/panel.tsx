@@ -1414,7 +1414,11 @@ export function Panel(props: PanelProps) {
                         {item.label}
                       </span>
                       <span style={{ flex: '1 1 auto' }} />
-                      <span style={smallStyle}>{t('panel.speaker.audioCount').replace('{n}', String(item.audioCount ?? 0))}</span>
+                      <span style={smallStyle}>
+                        {(item.samples ?? 0) > 0
+                          ? t('panel.speaker.samples').replace('{n}', String(item.samples))
+                          : t('panel.speaker.audioCount').replace('{n}', String(item.audioCount ?? 0))}
+                      </span>
                       <button type="button" style={{ ...buttonStyle, color: DANGER }} onClick={() => void deleteSpeaker(item.id)}>
                         {t('panel.speaker.delete')}
                       </button>
