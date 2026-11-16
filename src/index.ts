@@ -130,10 +130,10 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
 
     scope.effect(() => tools.register(defineTool({
       name: 'meeting_minutes_transcript',
-      description: '读取某个时段的 SenseVoice 转写（notta 生活日志 snippets）：按 [HH:mm:ss] 轨道/说话人(相似度)：文本 逐行返回。相似度 0-1，越高越确定。区间默认 06:00–24:00；maxChars 控制返回长度，超出会标记 truncated。写纪要前先用它取原文。',
+      description: '读取某个时段的 SenseVoice 转写（notta 生活日志 snippets）：按 [HH:mm:ss] 轨道/说话人(相似度)：文本 逐行返回。相似度 0-1，越高越确定。区间默认 00:00–24:00；maxChars 控制返回长度，超出会标记 truncated。写纪要前先用它取原文。',
       parameters: {
         day: { type: 'string', description: '日期 yyyy-MM-dd；不传取最近一天。' },
-        start: { type: 'string', description: '开始时间 HH:mm，默认 06:00。' },
+        start: { type: 'string', description: '开始时间 HH:mm，默认 00:00。' },
         end: { type: 'string', description: '结束时间 HH:mm，默认 24:00。' },
         maxChars: { type: 'integer', description: '返回文本上限，默认 24000。' },
       },
