@@ -11,8 +11,9 @@
  *   minutes.clear  -> remove the whole day's minutes file
  *   backgrounds.*  -> list/upsert/delete background cards and their selection
  */
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import os from 'node:os'
 import path from 'node:path'
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -23,6 +24,7 @@ import { defaultDownloadRoot, offerMatches, offersForPlatform } from './model-ca
 import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
 import { addLabel, deleteLabel, groupByDay, readLabels } from './speaker-labels.ts'
+import { audioPieces, diarizeTrack, nameSpeakers } from './speaker-diarize.ts'
 import { deleteSkill, readSkills, saveSkill, selectSkill } from './skills.ts'
 import { MeetingError } from './service.ts'
 import type { MeetingService } from './service.ts'
@@ -66,7 +68,7 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
-function dispatch(
+async function dispatch(
   service: MeetingService,
   jobs: MinutesJobStore | undefined,
   asr: { models: AsrModelRegistry; runtime: AsrRuntime; downloads?: ModelDownloads } | undefined,
@@ -174,6 +176,56 @@ function dispatch(
       if (typeof payload.enabled === 'boolean') return runtime.setEnabled(payload.enabled)
       throw new MeetingError('BAD_ASR', '缺少 enabled 或 mode')
     }
+    case 'speaker.assignments': {
+      const days = readAssignments(service.config.home)
+      const wanted = typeof payload.day === 'string' && payload.day ? payload.day : undefined
+      return wanted ? { day: wanted, map: days[wanted] ?? {} } : { days }
+    }
+    case 'speaker.analyze': {
+      const payloadDay = typeof payload.day === 'string' && payload.day ? payload.day : undefined
+      const day = service.dayPayload(payloadDay)
+      const labels = readLabels(service.config.home).filter((item) => item.day === day.day)
+      const models = speakerModelsDir()
+      const workDir = path.join(service.config.home, '.speaker-work')
+      const results = []
+      for (const track of ['mic', 'system']) {
+        const pieces = audioPieces(day.segments, track)
+        if (!pieces.length) continue
+        const result = await diarizeTrack({
+          runtimeHome: service.config.home,
+          modelsDir: models,
+          track,
+          pieces,
+          workDir,
+          threshold: typeof payload.threshold === 'number' ? payload.threshold : 0.75,
+
+          timeZone: service.config.timeZone,
+        })
+        if (result) results.push(result)
+      }
+      if (!results.length) {
+        throw new MeetingError('NO_AUDIO', '没有可用的音频，或分离模型缺失', '确认保存内容为「双轨原音 + 文本」，并检查声纹模型是否存在。')
+      }
+      const named = nameSpeakers(results, labels)
+      const map: Record<string, { speaker: string; name?: string; track: string }> = {}
+      for (const result of results) {
+        for (const [line, speaker] of result.byLine) {
+          const name = named.get(`${result.track}:${speaker}`)
+          map[String(line)] = { speaker, track: result.track, ...(name ? { name } : {}) }
+        }
+      }
+      const days = readAssignments(service.config.home)
+      days[day.day] = map
+      writeAssignments(service.config.home, days)
+      const speakers = [...new Set(results.flatMap((result) => result.speakers))]
+      return {
+        day: day.day,
+        lines: Object.keys(map).length,
+        speakers: speakers.length,
+        named: new Set([...named.values()]).size,
+        names: [...new Set([...named.values()])],
+      }
+    }
     case 'speaker.list': {
       const items = readLabels(service.config.home)
       let root = ''
@@ -280,6 +332,31 @@ function countAudio(root: string, day: string, start: number, end: number, timeZ
   }
   void timeZone
   return total
+}
+
+
+const ASSIGN_FILE = 'speaker-assignments.json'
+
+type Assignments = Record<string, Record<string, { speaker: string; name?: string; track: string }>>
+
+function readAssignments(home: string): Assignments {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(home, ASSIGN_FILE), 'utf8')) as { days?: Assignments }
+    return parsed.days ?? {}
+  } catch {
+    return {}
+  }
+}
+
+function writeAssignments(home: string, days: Assignments): void {
+  writeFileSync(path.join(home, ASSIGN_FILE), `${JSON.stringify({ version: 1, days }, null, 2)}\n`, 'utf8')
+}
+
+/** 分离模型默认借 voice-split 那份（已经下载过），可用 SPEAKER_MODELS 覆盖。 */
+function speakerModelsDir(): string {
+  const fromEnv = (process.env.SPEAKER_MODELS || '').trim()
+  if (fromEnv) return fromEnv
+  return path.join(os.homedir(), '.dsh', 'voice-split', 'models')
 }
 
 export function registerMeetingRoutes(

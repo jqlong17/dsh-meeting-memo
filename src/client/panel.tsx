@@ -258,6 +258,9 @@ export function Panel(props: PanelProps) {
   const [spkNote, setSpkNote] = useState('')
   const [spkView, setSpkView] = useState<'tag' | 'saved'>('tag')
   const [spkPicked, setSpkPicked] = useState<string[]>([])
+  const [assign, setAssign] = useState<Record<string, { speaker: string; name?: string; track: string }>>({})
+  const [spkAnalyzing, setSpkAnalyzing] = useState(false)
+  const [spkThreshold, setSpkThreshold] = useState(0.75)
   const [, setTick] = useState(0)
   const [editing, setEditing] = useState<EditState | null>(null)
   const [confirmId, setConfirmId] = useState('')
@@ -651,6 +654,18 @@ export function Panel(props: PanelProps) {
 
   useEffect(() => { void loadSkills() }, [loadSkills])
 
+  const loadAssign = useCallback(async (day: string) => {
+    const result = await rpc<{ day: string; map: Record<string, { speaker: string; name?: string; track: string }> }>(
+      'speaker.assignments', { day },
+    )
+    if (result.ok) setAssign(result.value.map ?? {})
+  }, [rpc])
+
+  useEffect(() => {
+    if (!data?.day) return
+    void loadAssign(data.day)
+  }, [data?.day, loadAssign])
+
   const loadSpeaker = useCallback(async () => {
     const result = await rpc<SpeakerPayload>('speaker.list')
     if (result.ok) setSpeaker(result.value)
@@ -732,6 +747,29 @@ export function Panel(props: PanelProps) {
     setSpkNote('')
     setNotice(t('panel.speaker.saved'))
     void loadSpeaker()
+  }
+
+  const analyzeSpeakers = async () => {
+    if (!data) return
+    setSpkAnalyzing(true)
+    setNoticeError('')
+    try {
+      const result = await rpc<{ speakers: number; lines: number; named: number; names: string[] }>(
+        'speaker.analyze', { day: data.day, threshold: spkThreshold },
+      )
+      if (!result.ok) {
+        setNoticeError(result.error.hint ? `${result.error.message} · ${result.error.hint}` : result.error.message)
+        return
+      }
+      const value = result.value
+      setNotice(`${t('panel.speaker.analyzed')
+        .replace('{s}', String(value.speakers))
+        .replace('{l}', String(value.lines))
+        .replace('{n}', String(value.named))}${value.names.length ? ` · ${value.names.join('、')}` : ''}`)
+      void loadAssign(data.day)
+    } finally {
+      setSpkAnalyzing(false)
+    }
   }
 
   const deleteSpeaker = async (id: string) => {
@@ -1199,6 +1237,27 @@ export function Panel(props: PanelProps) {
               style={buttonStyle}
               onClick={() => { setSpkStart(null); setSpkEnd(null) }}
             >{t('panel.speaker.reset')}</button>
+            <button
+              type="button"
+              style={buttonStyle}
+              disabled={spkAnalyzing}
+              onClick={() => void analyzeSpeakers()}
+            >{spkAnalyzing ? t('panel.speaker.analyzing') : t('panel.speaker.analyze')}</button>
+            <span style={{ ...smallStyle, whiteSpace: 'nowrap' }}>{t('panel.speaker.threshold')}</span>
+            <input
+              type="number"
+              min={0.5}
+              max={0.99}
+              step={0.05}
+              value={spkThreshold}
+              disabled={spkAnalyzing}
+              onChange={(event) => {
+                const next = Number(event.target.value)
+                if (Number.isFinite(next)) setSpkThreshold(Math.min(0.99, Math.max(0.5, next)))
+              }}
+              style={{ ...inputStyle, width: 64, fontFamily: MONO }}
+              title={t('panel.speaker.thresholdHint')}
+            />
           </div>
         </div>
 
@@ -1250,12 +1309,14 @@ export function Panel(props: PanelProps) {
             ) : rows.map((segment, index) => {
               const key = rowKey(segment, index)
               const picked = spkPicked.includes(key)
+              const assigned = segment.line ? assign[String(segment.line)] : undefined
+              const spokeName = assigned?.name ?? (assigned ? assigned.speaker.replace('speaker_', 'S') : '')
               return (
               <div
                 key={key}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '18px 62px 48px minmax(0, 1fr)',
+                  gridTemplateColumns: '18px 62px 48px 68px minmax(0, 1fr)',
                   columnGap: 8,
                   alignItems: 'start',
                   padding: '5px 0',
@@ -1275,6 +1336,21 @@ export function Panel(props: PanelProps) {
                 </span>
                 <span style={{ fontSize: FS.xs, lineHeight: '16px', color: trackColor(segment.track), whiteSpace: 'nowrap' }}>
                   {trackName(segment.track, t)}
+                </span>
+                <span style={{
+                  fontSize: FS.xs,
+                  lineHeight: '16px',
+                  padding: '0 4px',
+                  borderRadius: RADIUS_CHIP,
+                  border: `1px solid ${BORDER}`,
+                  background: spokeName ? ACCENT_SOFT : 'transparent',
+                  color: spokeName ? ACCENT : CAPTION,
+                  whiteSpace: 'nowrap',
+                  maxWidth: 76,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}>
+                  {spokeName || '—'}
                 </span>
                 <span style={{ fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>{segment.text}</span>
               </div>
@@ -1877,12 +1953,15 @@ export function Panel(props: PanelProps) {
           <div ref={listRef} style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '2px 10px 12px' }}>
             {visibleSegments.length === 0
               ? <div style={{ ...smallStyle, lineHeight: 1.6, padding: '10px 0' }}>{emptyText || t('panel.transcript.empty')}</div>
-              : visibleSegments.map((segment, index) => (
+              : visibleSegments.map((segment, index) => {
+                const assigned = segment.line ? assign[String(segment.line)] : undefined
+                const spokeName = assigned?.name ?? (assigned ? assigned.speaker.replace('speaker_', 'S') : '')
+                return (
                 <div
                   key={`${segment.s}-${index}`}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '62px 48px minmax(0, 1fr)',
+                    gridTemplateColumns: '62px 48px 68px minmax(0, 1fr)',
                     columnGap: 8,
                     alignItems: 'start',
                     padding: '5px 0',
@@ -1904,11 +1983,28 @@ export function Panel(props: PanelProps) {
                   }}>
                     {trackName(segment.track, t)}
                   </span>
+                  <span style={{
+                    justifySelf: 'start',
+                    fontSize: FS.xs,
+                    lineHeight: '16px',
+                    padding: '0 4px',
+                    borderRadius: RADIUS_CHIP,
+                    border: `1px solid ${BORDER}`,
+                    background: spokeName ? ACCENT_SOFT : 'transparent',
+                    color: spokeName ? ACCENT : CAPTION,
+                    whiteSpace: 'nowrap',
+                    maxWidth: 76,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}>
+                    {spokeName || '—'}
+                  </span>
                   <span style={{ minWidth: 0, fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>
                     {segment.text}
                   </span>
                 </div>
-              ))}
+                )
+              })}
           </div>
         </div>
       </div>
