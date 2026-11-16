@@ -308,6 +308,8 @@ async function dispatch(
         try {
           const row = JSON.parse(text) as Record<string, unknown>
           if (typeof row.emb !== 'string' || !row.emb) continue
+          // 只挑麦克风轨：system 轨是别人在说话，混进来会把质心带偏
+          if (typeof row.input !== 'string' || !row.input) continue
           const body = String(row.text ?? '').trim()
           if (body.length < 4) continue
           rows.push({
