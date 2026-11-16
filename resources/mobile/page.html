@@ -14,10 +14,40 @@
 <header>
   <h1>{{TITLE}}</h1>
   <p class="hint">{{HINT}}</p>
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="today" aria-selected="true" class="on">今日</button>
+    <button type="button" role="tab" data-tab="minutes" aria-selected="false">纪要</button>
+  </nav>
 </header>
 <main>
-{{BODY}}
+  <section class="panel on" data-panel="today">
+{{TODAY}}
+  </section>
+  <section class="panel" data-panel="minutes">
+{{MINUTES}}
+  </section>
 </main>
-<script>window.__MT__ = {{TOKEN}};</script>
+<script>
+window.__MT__ = {{TOKEN}};
+// 只切显示，不重新请求：数据都在 HTML 里。
+(function () {
+  var tabs = document.querySelectorAll('.tabs button');
+  var panels = document.querySelectorAll('.panel');
+  function pick(name) {
+    tabs.forEach(function (tab) {
+      var on = tab.dataset.tab === name;
+      tab.classList.toggle('on', on);
+      tab.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    panels.forEach(function (panel) {
+      panel.classList.toggle('on', panel.dataset.panel === name);
+    });
+    try { window.scrollTo(0, 0); } catch (e) {}
+  }
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () { pick(tab.dataset.tab); });
+  });
+})();
+</script>
 </body>
 </html>

@@ -27,6 +27,19 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{32}$/
 /** 打包后 __dirname 是 lib/，资源在 ../resources/mobile/。 */
 const ASSET_DIR = new URL('../resources/mobile/', import.meta.url)
 
+/** 读当天的说话人分配（缺失时返回空）。 */
+function readAssignments(home: string, day: string): Record<string, { speaker: string; name?: string }> {
+  try {
+    const file = new URL(`file://${home}/speaker-assignments.json`)
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as {
+      days?: Record<string, Record<string, { speaker: string; name?: string }>>
+    }
+    return parsed.days?.[day] ?? {}
+  } catch {
+    return {}
+  }
+}
+
 function asset(name: string): string {
   return readFileSync(new URL(name, ASSET_DIR), 'utf8')
 }
@@ -100,14 +113,68 @@ function renderItems(items: MobileItem[]): string {
   return parts.join('\n')
 }
 
-function renderPage(body: string, token: string): string {
+/** 今日的密度时间轴，服务端直出，不依赖前端脚本。 */
+function renderTimeline(buckets: Array<{ m: number; s: number }>, windowStart: number, windowEnd: number): string {
+  const bin = 5
+  const span = Math.max(bin, windowEnd - windowStart)
+  const count = Math.ceil(span / bin)
+  const sums = new Array<number>(count).fill(0)
+  for (const bucket of buckets) {
+    if (bucket.m < windowStart || bucket.m >= windowEnd) continue
+    const index = Math.min(count - 1, Math.floor((bucket.m - windowStart) / bin))
+    sums[index] += Math.max(0, bucket.s)
+  }
+  const width = 1000
+  const height = 120
+  const barWidth = width / count
+  const bars = sums.map((seconds, index) => {
+    const density = Math.min(1, seconds / (bin * 60))
+    const h = Math.max(1, density * (height - 6))
+    const x = index * barWidth
+    return `<rect x="${x.toFixed(1)}" y="${(height - h).toFixed(1)}" width="${Math.max(0.8, barWidth - 0.8).toFixed(1)}" height="${h.toFixed(1)}" rx="1" fill="#4176e6" opacity="${(0.25 + density * 0.7).toFixed(2)}"/>`
+  }).join('')
+  const ticks: string[] = []
+  for (let minute = Math.ceil(windowStart / 180) * 180; minute <= windowEnd; minute += 180) {
+    const x = ((minute - windowStart) / span) * width
+    const label = `${String(Math.floor(minute / 60)).padStart(2, '0')}:00`
+    ticks.push(`<text x="${x.toFixed(1)}" y="${height + 14}" font-size="20" fill="#8e8e93" text-anchor="middle">${label}</text>`)
+  }
+  return `<div class="timeline"><svg viewBox="0 0 ${width} ${height + 20}" width="100%" height="110" preserveAspectRatio="none">${bars}${ticks.join('')}</svg></div>`
+}
+
+/** 倒序转写：最新的在最前，带时间、说话人和正文。 */
+function renderTranscript(
+  segments: Array<{ s: number; e: number; track: string; text: string; line?: number; lines?: number[] }>,
+  assignments: Record<string, { speaker: string; name?: string }>,
+  limit = 150,
+): string {
+  const rows = [...segments].reverse().slice(0, limit)
+  if (!rows.length) return '<p class="empty">这段时间还没有转写。</p>'
+  const html = rows.map((segment) => {
+    const line = segment.line ?? segment.lines?.[0]
+    const assigned = line ? assignments[String(line)] : undefined
+    const speaker = assigned?.name ? assigned.name.split(/[（(]/)[0] : ''
+    const track = segment.track === 'system' ? '系统' : segment.track === 'mic' ? '麦克风' : '合并'
+    return `<article class="row">
+  <div class="meta"><span class="time">${escapeHtml(formatClock(segment.s, true))}</span>`
+      + `<span class="tag">${escapeHtml(track)}</span>`
+      + (speaker ? `<span class="tag spk">${escapeHtml(speaker)}</span>` : '')
+      + `</div>
+  <p>${escapeHtml(segment.text)}</p>
+</article>`
+  }).join('\n')
+  return html + (segments.length > limit ? `<p class="empty">只显示最近 ${limit} 条</p>` : '')
+}
+
+function renderPage(sections: { today: string; minutes: string }, token: string): string {
   const page = asset('page.html')
   const style = asset('style.css')
   return page
     .replaceAll('{{TITLE}}', '会议纪要')
     .replaceAll('{{HINT}}', '本机录音与本地转写')
     .replaceAll('{{STYLE}}', style)
-    .replaceAll('{{BODY}}', body)
+    .replaceAll('{{TODAY}}', sections.today)
+    .replaceAll('{{MINUTES}}', sections.minutes)
     .replaceAll('{{TOKEN}}', JSON.stringify(token))
 }
 
@@ -176,17 +243,24 @@ export function registerMobile(ctx: Context, service: MeetingService): () => voi
 
       if (url.pathname !== MOBILE_CHANNEL) return send(404, 'not found')
 
-      let body: string
+      let sections: { today: string; minutes: string }
       try {
         const payload = service.dayPayload(undefined)
+        const assignments = readAssignments(service.config.home, payload.day)
         const recent = collectItems(service, [...payload.days].reverse())
-        body = `${renderStats(payload.stats)}<h2 class="group">最近纪要</h2>${renderItems(recent)}`
+        sections = {
+          today: `${renderStats(payload.stats)}`
+            + renderTimeline(payload.buckets, payload.window.start, payload.window.end)
+            + `<h2 class="group">转写</h2>${renderTranscript(payload.segments, assignments)}`,
+          minutes: `<h2 class="group">最近纪要</h2>${renderItems(recent)}`,
+        }
       } catch (error) {
         // 数据读不出来也要让人看懂发生了什么，而不是白屏。
         const message = error instanceof Error ? error.message : String(error)
-        body = `<p class="empty"><strong>读取失败</strong>${escapeHtml(message)}<br>在桌面端确认「转写服务」和纪要文件都正常。</p>`
+        const broken = `<p class="empty"><strong>读取失败</strong>${escapeHtml(message)}<br>在桌面端确认「转写服务」和纪要文件都正常。</p>`
+        sections = { today: broken, minutes: broken }
       }
-      return send(200, renderPage(body, token), 'text/html; charset=utf-8')
+      return send(200, renderPage(sections, token), 'text/html; charset=utf-8')
     },
   })
 }
