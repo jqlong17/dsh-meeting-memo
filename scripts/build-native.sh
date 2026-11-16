@@ -13,7 +13,13 @@ tmp="$(mktemp -t asr-helper).bin"
 mkdir -p "$home/bin"
 
 echo "[build-native] compiling"
-swiftc -O -o "$tmp" "$repo/native/asr-helper.swift" \
+RUNTIME="$home/runtimes/sherpa-onnx-v2.0.1-osx-arm64-shared-no-tts"
+
+# 声纹要用 sherpa-onnx 的 C API；rpath 写死运行时目录，插件拉起时不需要 DYLD_LIBRARY_PATH。
+swiftc -O -import-objc-header "$repo/native/bridge.h" -o "$tmp" \
+  "$repo/native/asr-helper.swift" \
+  -I "$RUNTIME/include" -L "$RUNTIME/lib" -lsherpa-onnx-c-api \
+  -Xlinker -rpath -Xlinker "$RUNTIME/lib" \
   -framework AVFoundation \
   -framework CoreAudio \
   -framework CoreML \

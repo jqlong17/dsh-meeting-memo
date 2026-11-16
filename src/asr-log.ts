@@ -35,6 +35,8 @@ export interface AsrSnippetInput {
   track: string
   text: string
   audio?: string
+  /** float16 + base64 的声纹向量，用于实时说话人匹配。 */
+  emb?: string
 }
 
 export function appendSnippet(root: string, input: AsrSnippetInput): void {
@@ -48,6 +50,7 @@ export function appendSnippet(root: string, input: AsrSnippetInput): void {
     text: input.text,
     source: 'asr',
     ...(input.audio ? { audio: input.audio } : {}),
+    ...(input.emb ? { emb: input.emb } : {}),
   }
   appendFileSync(path.join(dir, 'snippets.jsonl'), `${JSON.stringify(row)}\n`, 'utf8')
 }

@@ -227,6 +227,10 @@ export interface SpeakerLabelDTO {
   /** 勾选的具体转写行；按行打标时才有。 */
   lines?: number[]
   createdAt: string
+  /** 实时匹配的相似度（0-1），批量分离时不带。 */
+  score?: number
+  /** 这条分配是实时匹配还是批量分离写的。 */
+  source?: 'live' | 'batch'
   /** 这段时间里落了多少个 wav。 */
   audioCount?: number
 }

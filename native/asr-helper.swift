@@ -300,6 +300,64 @@ func defaultInputID() -> AudioDeviceID? {
     return device == 0 ? nil : device
 }
 
+
+// MARK: - 声纹
+
+/// CAM++ 之类的声纹模型：把一段音频压成定长向量。
+final class SpeakerEmbedder {
+    private var extractor: OpaquePointer?
+    private(set) var dim = 0
+
+    init?(model: String) {
+        var config = SherpaOnnxSpeakerEmbeddingExtractorConfig()
+        config.model = UnsafePointer(strdup(model))
+        config.num_threads = 1
+        config.debug = 0
+        config.provider = UnsafePointer(strdup("cpu"))
+        guard let created = SherpaOnnxCreateSpeakerEmbeddingExtractor(&config) else { return nil }
+        extractor = created
+        dim = Int(SherpaOnnxSpeakerEmbeddingExtractorDim(created))
+        if dim <= 0 { SherpaOnnxDestroySpeakerEmbeddingExtractor(created); extractor = nil; return nil }
+    }
+
+    deinit {
+        if let extractor { SherpaOnnxDestroySpeakerEmbeddingExtractor(extractor) }
+    }
+
+    /// float16 + base64：192 维只占 512 字节，JSON 不会膨胀。
+    func embedding(_ samples: [Float]) -> String? {
+        guard let extractor, !samples.isEmpty else { return nil }
+        guard let stream = SherpaOnnxSpeakerEmbeddingExtractorCreateStream(extractor) else { return nil }
+        defer { SherpaOnnxDestroyOnlineStream(stream) }
+        samples.withUnsafeBufferPointer { buffer in
+            SherpaOnnxOnlineStreamAcceptWaveform(stream, Int32(sampleRate), buffer.baseAddress, Int32(buffer.count))
+        }
+        SherpaOnnxOnlineStreamInputFinished(stream)
+        guard SherpaOnnxSpeakerEmbeddingExtractorIsReady(extractor, stream) != 0 else { return nil }
+        guard let vector = SherpaOnnxSpeakerEmbeddingExtractorComputeEmbedding(extractor, stream) else { return nil }
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(dim * 2)
+        for i in 0..<dim {
+            let bits = floatToHalf(vector[i])
+            bytes.append(UInt8(bits & 0xFF))
+            bytes.append(UInt8((bits >> 8) & 0xFF))
+        }
+        return Data(bytes).base64EncodedString()
+    }
+}
+
+/// Float32 → Float16 的位转换（只需要存，不需要还原精度）。
+func floatToHalf(_ value: Float) -> UInt16 {
+    let bits = value.bitPattern
+    let sign = UInt16((bits >> 16) & 0x8000)
+    var exponent = Int((bits >> 23) & 0xFF) - 127 + 15
+    var mantissa = (bits & 0x7FFFFF) >> 13
+    if exponent <= 0 { return sign }
+    if exponent >= 31 { return sign | 0x7C00 }
+    mantissa = (bits >> 13) & 0x3FF
+    return sign | UInt16(exponent << 10) | UInt16(mantissa)
+}
+
 func downsample(_ buffer: AVAudioPCMBuffer, converter: AVAudioConverter, target: AVAudioFormat) -> [Float] {
     let ratio = target.sampleRate / buffer.format.sampleRate
     let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
@@ -344,9 +402,11 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: 1, interleaved: false)!
     /// 指定输入设备（UID）；为空则跟随系统默认。
     let inputUID: String?
+    let embedder: SpeakerEmbedder?
     private(set) var inputName = ""
 
-    init(model: SenseVoice?, mode: String, language: String, audioRoot: String?, inputUID: String?) {
+    init(model: SenseVoice?, mode: String, language: String, audioRoot: String?, inputUID: String?, embedModel: String?) {
+        self.embedder = embedModel.flatMap { SpeakerEmbedder(model: $0) }
         self.model = model
         self.mode = mode
         self.language = language
@@ -540,6 +600,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
                 "speechSeconds": speech,
             ]
             if !audioPath.isEmpty { event["audio"] = audioPath }
+            if let emb = embedder?.embedding(samples) { event["emb"] = emb }
             emit(event)
         } catch {
             emit(["type": "error", "track": track, "message": "转写失败：\(error.localizedDescription)"])
@@ -646,7 +707,7 @@ if external {
     }
     model = loaded
 }
-let capture = Capture(model: model, mode: mode, language: language, audioRoot: external || mode == "raw" ? audio : nil, inputUID: arg("input"))
+let capture = Capture(model: model, mode: mode, language: language, audioRoot: external || mode == "raw" ? audio : nil, inputUID: arg("input"), embedModel: arg("embed-model"))
 signal(SIGINT, SIG_IGN)
 signal(SIGTERM, SIG_IGN)
 let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)

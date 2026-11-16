@@ -24,6 +24,7 @@ import { defaultDownloadRoot, offerMatches, offersForPlatform } from './model-ca
 import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
 import { addLabel, deleteLabel, groupByDay, readLabels } from './speaker-labels.ts'
+import { readAssignments, writeAssignments } from './speaker-assignments.ts'
 import { audioPieces, diarizeTrack, nameSpeakers } from './speaker-diarize.ts'
 import { dayKey } from './asr-log.ts'
 import { listMinutesDays } from './minutes.ts'
@@ -239,7 +240,7 @@ async function dispatch(
       for (const result of results) {
         for (const [line, speaker] of result.byLine) {
           const name = named.get(`${result.track}:${speaker}`)
-          map[String(line)] = { speaker, track: result.track, ...(name ? { name } : {}) }
+          map[String(line)] = { speaker, track: result.track, source: 'batch', ...(name ? { name } : {}) }
         }
       }
       const days = readAssignments(service.config.home)
@@ -362,23 +363,6 @@ function countAudio(root: string, day: string, start: number, end: number, timeZ
   return total
 }
 
-
-const ASSIGN_FILE = 'speaker-assignments.json'
-
-type Assignments = Record<string, Record<string, { speaker: string; name?: string; track: string }>>
-
-function readAssignments(home: string): Assignments {
-  try {
-    const parsed = JSON.parse(readFileSync(path.join(home, ASSIGN_FILE), 'utf8')) as { days?: Assignments }
-    return parsed.days ?? {}
-  } catch {
-    return {}
-  }
-}
-
-function writeAssignments(home: string, days: Assignments): void {
-  writeFileSync(path.join(home, ASSIGN_FILE), `${JSON.stringify({ version: 1, days }, null, 2)}\n`, 'utf8')
-}
 
 /** 分离模型默认借 voice-split 那份（已经下载过），可用 SPEAKER_MODELS 覆盖。 */
 function speakerModelsDir(): string {

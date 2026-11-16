@@ -262,6 +262,7 @@ export function Panel(props: PanelProps) {
   const [spkView, setSpkView] = useState<'tag' | 'saved'>('tag')
   const [spkPicked, setSpkPicked] = useState<string[]>([])
   const [assign, setAssign] = useState<Record<string, { speaker: string; name?: string; track: string }>>({})
+  const loadAssignRef = useRef<(day: string) => Promise<void>>(async () => {})
   const [spkAnalyzing, setSpkAnalyzing] = useState(false)
   const [spkThreshold, setSpkThreshold] = useState(0.75)
   const [, setTick] = useState(0)
@@ -349,6 +350,9 @@ export function Panel(props: PanelProps) {
     const refresh = (): void => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       void loadDayRef.current(dayRef.current || undefined)
+      // 实时说话人识别是后台写文件的，刷新时把分配表一起拉一次
+      const day = dayRef.current
+      if (day) void loadAssignRef.current(day)
     }
     const timer = window.setInterval(refresh, 5_000)
     const onFocus = (): void => refresh()
@@ -663,6 +667,10 @@ export function Panel(props: PanelProps) {
     )
     if (result.ok) setAssign(result.value.map ?? {})
   }, [rpc])
+
+  useEffect(() => {
+    loadAssignRef.current = loadAssign
+  }, [loadAssign])
 
   useEffect(() => {
     if (!data?.day) return

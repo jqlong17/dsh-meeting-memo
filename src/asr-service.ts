@@ -4,6 +4,7 @@
  */
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -11,6 +12,9 @@ import { AsrModelRegistry, type AsrModel } from './asr-models.ts'
 import { appendActivity, appendSnippet, asrLogRoot, dayKey, type AsrMode } from './asr-log.ts'
 import { addChargedModel, applyMeasured, parseFootprint, trimMemory, type MemoryParts, type MemorySample } from './memory-sample.ts'
 import { audioHealthOf, audioNeedsRestart, type AudioHealth } from './audio-health.ts'
+import { setAssignment } from './speaker-assignments.ts'
+import { buildCentroids, decodeEmbedding, matchSpeaker, type CentroidSet } from './speaker-live.ts'
+import { readLabels } from './speaker-labels.ts'
 import { sherpaCommand, sherpaReady, transcribeWav } from './sherpa.ts'
 
 export interface AsrStatus {
@@ -187,6 +191,13 @@ export class AsrRuntime {
   private audioTicks: Record<string, unknown>[] = []
   /** 实际在用的麦克风名字，由 helper 上报。 */
   private inputName = ''
+  /** 声纹模型路径；为空表示不做实时说话人识别。 */
+  private readonly embedModel: string
+  /** 质心缓存，标签文件一变就重建。 */
+  private centroids: CentroidSet | null = null
+  private centroidsKey = ''
+  /** 当天 snippets.jsonl 的行号游标。 */
+  private snippetLine = 0
   /** 可用输入设备，启动时问一次 helper。 */
   private inputs: Array<{ uid: string; name: string; default?: boolean }> = []
   private audioRestarts = 0
@@ -198,6 +209,7 @@ export class AsrRuntime {
   private readonly root: string
 
   constructor(home: string, timeZone: string, sourceRoot: string = pluginRoot()) {
+    this.embedModel = resolveEmbedModel(home)
     this.home = home
     this.timeZone = timeZone
     this.models = new AsrModelRegistry(home)
@@ -351,6 +363,46 @@ export class AsrRuntime {
     this.stopChild()
   }
 
+  /**
+   * 转写刚落库就比对已登记的人；命中才写，没命中留空（面板显示未识别）。
+   * 质心只在标签文件变化时重建，平时的开销就是一次 192 维点积。
+   */
+  private assignLive(day: string, line: number, track: string, emb: string): void {
+    if (!this.embedModel) return
+    const vector = decodeEmbedding(emb)
+    if (!vector) return
+    const set = this.centroidsFor(day)
+    if (!set.centroids.size) return
+    const hit = matchSpeaker(vector, set)
+    if (!hit) return
+    try {
+      setAssignment(this.home, day, line, {
+        speaker: 'live',
+        name: hit.name,
+        track,
+        score: Math.round(hit.score * 1000) / 1000,
+        source: 'live',
+      })
+    } catch {
+      // 写不进去不影响转写
+    }
+  }
+
+  private centroidsFor(day: string): CentroidSet {
+    let stamp = ''
+    try {
+      stamp = String(statSync(path.join(this.home, 'speaker-labels.json')).mtimeMs)
+    } catch {
+      stamp = '0'
+    }
+    const key = `${day}:${stamp}`
+    if (this.centroids && this.centroidsKey === key) return this.centroids
+    const labels = readLabels(this.home).filter((label) => label.day === day)
+    this.centroids = buildCentroids(this.logRoot(), day, labels, this.home)
+    this.centroidsKey = key
+    return this.centroids
+  }
+
   private spawn(helper: string, model: AsrModel): void {
     reapStaleHelper(this.home)
     const day = dayKey(this.timeZone)
@@ -358,9 +410,11 @@ export class AsrRuntime {
     const external = model.kind !== 'coreml-sensevoice'
     mkdirSync(audio, { recursive: true })
     const inputArgs = this.persisted.input ? ['--input', this.persisted.input] : []
+    const embedArgs = this.embedModel ? ['--embed-model', this.embedModel] : []
+    this.snippetLine = countSnippetLines(this.logRoot(), dayKey(this.timeZone))
     const args = external
       ? ['capture', '--engine', 'external', '--audio', audio, '--mode', this.persisted.mode, '--language', this.persisted.language, ...inputArgs]
-      : ['capture', '--model', model.path, '--mode', this.persisted.mode, '--language', this.persisted.language, ...(this.persisted.mode === 'raw' ? ['--audio', audio] : []), ...inputArgs]
+      : ['capture', '--model', model.path, '--mode', this.persisted.mode, '--language', this.persisted.language, ...(this.persisted.mode === 'raw' ? ['--audio', audio] : []), ...inputArgs, ...embedArgs]
     const generation = ++this.generation
     this.runningModelId = model.id
     this.memory = []
@@ -477,6 +531,7 @@ export class AsrRuntime {
       if (!startAt || !text) return
       const track = this.persisted.mode === 'merged' ? 'merged' : String(event.track || 'mic')
       const day = dayKey(this.timeZone, new Date(startAt))
+      const emb = typeof event.emb === 'string' && event.emb ? event.emb : ''
       appendSnippet(this.logRoot(), {
         day,
         startAt,
@@ -484,7 +539,10 @@ export class AsrRuntime {
         track,
         text,
         ...(typeof event.audio === 'string' ? { audio: event.audio } : {}),
+        ...(emb ? { emb } : {}),
       })
+      this.snippetLine += 1
+      if (emb) this.assignLive(day, this.snippetLine, track, emb)
       this.lastSnippetAt = endAt
       return
     }
@@ -711,5 +769,24 @@ export class AsrRuntime {
     })
     this.helperPath = binary
     return binary
+  }
+}
+
+/** 声纹模型默认借 voice-split 那份；可用 SPEAKER_EMBED_MODEL 覆盖。 */
+export function resolveEmbedModel(home: string): string {
+  const fromEnv = (process.env.SPEAKER_EMBED_MODEL || '').trim()
+  if (fromEnv) return fromEnv
+  void home
+  const fallback = path.join(os.homedir(), '.dsh', 'voice-split', 'models', '3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx')
+  return existsSync(fallback) ? fallback : ''
+}
+
+/** 追加前先数一遍行号，实时分配才能对上 snippets.jsonl 的行。 */
+export function countSnippetLines(root: string, day: string): number {
+  try {
+    const text = readFileSync(path.join(root, day, 'snippets.jsonl'), 'utf8')
+    return text.split('\n').filter((line) => line.trim()).length
+  } catch {
+    return 0
   }
 }
