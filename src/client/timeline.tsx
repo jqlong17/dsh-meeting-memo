@@ -208,7 +208,8 @@ export function TimelineChart(props: TimelineChartProps) {
     return ticks
   }, [start, end])
 
-  const labelEvery = plotW >= 560 ? 1 : 2
+  // 每小时约需 56px 才不挤；宽度不够就隔一个画
+  const labelEvery = plotW >= (span / 60) * 56 ? 1 : 2
   const selStart = clamp(Math.min(selection.start, selection.end), start, end)
   const selEnd = clamp(Math.max(selection.start, selection.end), start, end)
   const selX = xOf(selStart)
@@ -468,14 +469,18 @@ export function TimelineChart(props: TimelineChartProps) {
           </>
         )}
 
-        {hourTicks.map((minute, index) => {
-          const even = (minute / 60) % labelEvery === 0
-          const last = minute === hourTicks[hourTicks.length - 1]
-          if (!even && !last) return null
+        {hourTicks.filter((minute) => (minute / 60) % labelEvery === 0).map((minute, index, list) => {
+          const x = xOf(minute)
+          const last = index === list.length - 1
+          const text = formatTime(minute)
+          // 和上一个标签挨太近就丢掉：零点前后标签最容易粘在一起
+          if (index > 0 && Math.abs(x - xOf(list[index - 1])) < 48) return null
+          // 最后一个标签如果贴着右边界，会和时间轴末尾重叠
+          if (last && PADDING.left + plotW - x < 48) return null
           return (
             <text
               key={`label-${minute}`}
-              x={xOf(minute)}
+              x={x}
               y={baseY + 13}
               fontSize={FS.xs}
               fill={FG3}
@@ -483,7 +488,7 @@ export function TimelineChart(props: TimelineChartProps) {
               opacity={0.85}
               pointerEvents="none"
             >
-              {formatTime(minute)}
+              {text}
             </text>
           )
         })}
