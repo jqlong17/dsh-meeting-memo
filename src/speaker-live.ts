@@ -169,83 +169,90 @@ export interface CentroidSet {
  * 从当天片段里取声纹，按人工标签求每人质心。
  * 标签里的行号对应 snippets.jsonl 的行号，所以历史片段也能直接参与，不需要音频。
  */
+/**
+ * 从标签样本算每人质心。
+ *
+ * 标签可以来自不同日期：人的音色不会因为过了零点就变，所以库是跨天共用的。
+ * 每条标签记着自己那天的行号，逐天读取 snippets.jsonl 取声纹。
+ */
 export function buildCentroids(
   root: string,
-  day: string,
   labels: SpeakerLabel[],
   home?: string,
-  /** 只统计这个设备录的样本：换麦克风后声纹会明显掉分，混在一起就会谁都认不出。 */
+  /** 只统计这个设备录的样本：换麦克风后声纹会明显掉分。 */
   device?: string,
-  /** 只看这条轨道的样本：麦克风是近讲、系统声音是回环，混在一起质心会飘。 */
+  /** 只看这条轨道的样本：麦克风近讲、系统声音回环，混着算质心会漂。 */
   track?: string,
 ): CentroidSet {
   const centroids = new Map<string, Vector>()
   let samples = 0
-  const file = path.join(root, day, 'snippets.jsonl')
-  if (!existsSync(file)) return { centroids, samples }
+  if (!labels.length) return { centroids, samples }
 
-  const byLine = new Map<number, Vector>()
-  const audioByLine = new Map<number, string>()
-  const trackByLine = new Map<number, string>()
-  let index = 0
-  for (const raw of readFileSync(file, 'utf8').split('\n')) {
-    if (!raw.trim()) continue
-    index += 1
-    let row: { emb?: unknown; audio?: unknown; input?: unknown; track?: unknown }
-    try {
-      row = JSON.parse(raw) as { emb?: unknown; audio?: unknown; input?: unknown; track?: unknown }
-    } catch {
-      continue
-    }
-    if (typeof row.track === 'string') trackByLine.set(index, row.track)
-    if (track && row.track !== track) {
-      if (typeof row.audio === 'string') audioByLine.set(index, row.audio)
-      continue
-    }
-    if (device && (typeof row.input !== 'string' || row.input !== device)) {
-      // 设备不匹配的样本不参与质心
-      if (typeof row.audio === 'string') audioByLine.set(index, row.audio)
-      continue
-    }
-    if (typeof row.audio === 'string') audioByLine.set(index, row.audio)
-    if (typeof row.emb !== 'string') continue
-    const vector = decodeEmbedding(row.emb)
-    if (vector) byLine.set(index, vector)
-  }
-
-  // 老片段没向量：用 wav 补算（只在标签覆盖到它们时）
-  if (home) {
-    const needs: Array<{ key: string; audio: string }> = []
-    for (const label of labels) {
-      for (const line of label.lines ?? []) {
-        if (byLine.has(line)) continue
-        if (track && trackByLine.get(line) !== track) continue
-        const audio = audioByLine.get(line)
-        if (audio) needs.push({ key: `${day}:${line}`, audio })
+  const days = [...new Set(labels.map((label) => label.day))]
+  const byDay = new Map<string, { emb: Map<number, Vector>; audio: Map<number, string>; track: Map<number, string> }>()
+  for (const day of days) {
+    const file = path.join(root, day, 'snippets.jsonl')
+    if (!existsSync(file)) continue
+    const emb = new Map<number, Vector>()
+    const audio = new Map<number, string>()
+    const trackOf = new Map<number, string>()
+    let index = 0
+    for (const raw of readFileSync(file, 'utf8').split('\n')) {
+      if (!raw.trim()) continue
+      index += 1
+      let row: { emb?: unknown; audio?: unknown; input?: unknown; track?: unknown }
+      try {
+        row = JSON.parse(raw) as { emb?: unknown; audio?: unknown; input?: unknown; track?: unknown }
+      } catch {
+        continue
       }
+      if (typeof row.track === 'string') trackOf.set(index, row.track)
+      if (typeof row.audio === 'string') audio.set(index, row.audio)
+      if (typeof row.emb !== 'string') continue
+      const vector = decodeEmbedding(row.emb)
+      if (vector) emb.set(index, vector)
     }
-    if (needs.length) {
-      const cache = backfillEmbeddings(home, needs)
-      for (const need of needs) {
-        const encoded = cache[need.key]
-        if (!encoded) continue
-        const vector = decodeEmbedding(encoded)
-        if (vector) byLine.set(Number(need.key.split(':')[1]), vector)
-      }
-    }
+    byDay.set(day, { emb, audio, track: trackOf })
   }
 
   const grouped = new Map<string, Vector[]>()
+  const needs: Array<{ key: string; audio: string }> = []
   for (const label of labels) {
+    const rows = byDay.get(label.day)
+    if (!rows) continue
     for (const line of label.lines ?? []) {
-      const vector = byLine.get(line)
+      if (track && rows.track.get(line) !== track) continue
+      const vector = rows.emb.get(line)
+      if (vector) {
+        const list = grouped.get(label.label) ?? []
+        list.push(vector)
+        grouped.set(label.label, list)
+        samples += 1
+        continue
+      }
+      // 老片段没向量：从 wav 补算一次，结果落缓存
+      const audio = rows.audio.get(line)
+      if (audio) needs.push({ key: `${label.day}:${line}`, audio })
+    }
+  }
+
+  if (home && needs.length) {
+    const cache = backfillEmbeddings(home, needs)
+    for (const need of needs) {
+      const encoded = cache[need.key]
+      if (!encoded) continue
+      const vector = decodeEmbedding(encoded)
       if (!vector) continue
+      const [day, line] = need.key.split(':')
+      const label = labels.find((item) => item.day === day && (item.lines ?? []).includes(Number(line)))
+      if (!label) continue
       const list = grouped.get(label.label) ?? []
       list.push(vector)
       grouped.set(label.label, list)
       samples += 1
     }
   }
+
   for (const [name, vectors] of grouped) {
     const center = centroid(vectors)
     if (center) centroids.set(name, center)

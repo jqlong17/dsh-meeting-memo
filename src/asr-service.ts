@@ -400,9 +400,10 @@ export class AsrRuntime {
     }
     const key = `${day}:${track}:${device}:${stamp}`
     if (this.centroids && this.centroidsKey === key) return this.centroids
-    const labels = readLabels(this.home).filter((label) => label.day === day)
+    // 标签跨天共用：昨天登记的样本，今天照样用来认人
+    const labels = readLabels(this.home)
     this.centroids = buildCentroids(
-      this.logRoot(), day, labels, this.home,
+      this.logRoot(), labels, this.home,
       track === 'mic' ? (device || undefined) : undefined,
       track,
     )
