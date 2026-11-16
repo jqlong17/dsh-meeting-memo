@@ -52,7 +52,8 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv = process.env
     lifelogRoot: rootInput ? path.resolve(expandHome(rootInput)) : null,
     home: homeInput ? path.resolve(expandHome(homeInput)) : path.join(dshHome, 'meeting-memo'),
     timeZone: resolveTimeZone(config.timeZone),
-    windowStart: 6 * 60,
+    // 一天就是 00:00–24:00：跨零点后数据才不会落进窗口之前
+    windowStart: 0,
     windowEnd: 24 * 60,
     provider: typeof config.provider === 'string' && config.provider.trim() ? config.provider.trim() : null,
     model: typeof config.model === 'string' && config.model.trim() ? config.model.trim() : null,

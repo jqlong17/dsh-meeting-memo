@@ -213,9 +213,14 @@ export class MeetingService {
     const detection = this.detectRoot()
     const { day, data, days, root, today } = this.loadDay(dayRequest)
     const stats = dayStats(data)
+    const earliest = data.buckets.length ? Math.max(0, Math.floor(data.buckets[0].m)) : null
     const selection = this.readSelection(day, today, data)
+    // 选区也要跟着最早的数据往前放，否则凌晨的片段会被挡在选区之外
+    if (earliest !== null && earliest < selection.start) selection.start = earliest
     const segmentsTotal = data.segments.length
     const segments = data.segments.slice(0, MAX_SEGMENTS)
+    // 窗口固定为自然日 00:00–24:00；旧配置里的 06:00 起点不再把凌晨数据裁掉
+    const windowStart = 0
     return {
       day,
       today,
@@ -229,7 +234,7 @@ export class MeetingService {
         activity: path.join(root, day, 'activity.jsonl'),
         snippets: path.join(root, day, 'snippets.jsonl'),
       },
-      window: { start: this.config.windowStart, end: this.config.windowEnd },
+      window: { start: windowStart, end: this.config.windowEnd },
       buckets: data.buckets.map(toBucketDTO),
       segments: segments.map(toSegmentDTO),
       segmentsTotal,
