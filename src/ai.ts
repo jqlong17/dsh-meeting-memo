@@ -98,7 +98,7 @@ export function buildPrompt(input: BuildPromptInput): { system: string; user: st
     input.supplements ? `补充资料（含背景卡和本次补充里的飞书链接读出的正文；用来核对名词、数字和范围，不要把没在会上发生的事写成结论）：\n${input.supplements}` : '',
     background,
     '',
-    '转写（[时间] 轨道：文本）：',
+    '转写（[时间] 轨道/说话人(相似度)：文本）：',
     input.transcript,
   ].filter(Boolean).join('\n')
   return { system: input.system?.trim() || SYSTEM_PROMPT, user }

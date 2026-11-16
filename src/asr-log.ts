@@ -39,6 +39,10 @@ export interface AsrSnippetInput {
   emb?: string
   /** 麦克风设备名：声纹跨设备会明显掉分，所以按设备分开登记。 */
   input?: string
+  /** 写入当时判定的说话人（快照；权威值仍在 speaker-assignments.json）。 */
+  speaker?: string
+  /** 判定相似度 0-1，大模型据此判断「有多确信」。 */
+  speakerScore?: number
 }
 
 export function appendSnippet(root: string, input: AsrSnippetInput): void {
@@ -54,6 +58,8 @@ export function appendSnippet(root: string, input: AsrSnippetInput): void {
     ...(input.audio ? { audio: input.audio } : {}),
     ...(input.emb ? { emb: input.emb } : {}),
     ...(input.input ? { input: input.input } : {}),
+    ...(input.speaker ? { speaker: input.speaker } : {}),
+    ...(typeof input.speakerScore === 'number' ? { speakerScore: input.speakerScore } : {}),
   }
   appendFileSync(path.join(dir, 'snippets.jsonl'), `${JSON.stringify(row)}\n`, 'utf8')
 }

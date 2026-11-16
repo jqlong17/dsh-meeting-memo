@@ -1368,7 +1368,7 @@ export function Panel(props: PanelProps) {
                 <span style={{ fontSize: FS.xs, lineHeight: '16px', color: trackColor(segment.track), whiteSpace: 'nowrap' }}>
                   {trackName(segment.track, t)}
                 </span>
-                <SpeakerChip name={spokeName} />
+                <SpeakerChip name={spokeName} score={assigned?.score ?? segment.speakerScore} />
                 <span style={{ fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>{segment.text}</span>
               </div>
               )
@@ -2020,7 +2020,7 @@ export function Panel(props: PanelProps) {
                   }}>
                     {trackName(segment.track, t)}
                   </span>
-                  <SpeakerChip name={spokeName} />
+                  <SpeakerChip name={spokeName} score={assigned?.score ?? segment.speakerScore} />
                   <span style={{ minWidth: 0, fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>
                     {segment.text}
                   </span>
@@ -2688,10 +2688,10 @@ function shortSpeaker(name: string): string {
 }
 
 /** 转写行里的「说话人」标签，今日和说话人识别共用。 */
-function SpeakerChip({ name }: { name: string }): ReactElement {
+function SpeakerChip({ name, score }: { name: string; score?: number }): ReactElement {
   return (
     <span
-      title={name || '未分配'}
+      title={name ? `${name}${typeof score === 'number' ? ` · 相似度 ${score.toFixed(2)}` : ''}` : '未分配'}
       style={{
         justifySelf: 'start',
         display: 'inline-block',

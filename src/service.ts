@@ -102,6 +102,8 @@ function toSegmentDTO(segment: { s: number; e: number; track: string; text: stri
     ...(typeof segment.line === 'number' ? { line: segment.line } : {}),
     ...(segment.lines?.length ? { lines: segment.lines } : {}),
     ...(segment.audio ? { audio: segment.audio } : {}),
+    ...(segment.speaker ? { speaker: segment.speaker } : {}),
+    ...(typeof segment.speakerScore === 'number' ? { speakerScore: segment.speakerScore } : {}),
   }
 }
 
@@ -683,16 +685,25 @@ export class MeetingService {
 
 
   /** 说话人分配按行号存在旁边，读一次缓存当天结果。 */
-  private speakerCache: { day: string; map: Record<string, { name?: string }> } | null = null
+  private speakerCache: { day: string; map: Record<string, { name?: string; score?: number }> } | null = null
 
-  speakerOf(day: string, segment: { line?: number; lines?: number[] }): string | undefined {
-    if (!day) return undefined
-    if (!this.speakerCache || this.speakerCache.day !== day) {
-      this.speakerCache = { day, map: readAssignments(this.config.home)[day] ?? {} }
-    }
+  /** 返回「名字(相似度)」，拿不到名字就 undefined；大模型靠它判断谁说的、有多确信。 */
+  speakerOf(day: string, segment: { line?: number; lines?: number[]; speaker?: string; speakerScore?: number }): string | undefined {
     const line = segment.line ?? segment.lines?.[0]
-    if (!line) return undefined
-    return this.speakerCache.map[String(line)]?.name
+    let name = segment.speaker
+    let score = segment.speakerScore
+    if (day && line) {
+      if (!this.speakerCache || this.speakerCache.day !== day) {
+        this.speakerCache = { day, map: readAssignments(this.config.home)[day] ?? {} }
+      }
+      const entry = this.speakerCache.map[String(line)]
+      if (entry?.name) {
+        name = entry.name
+        score = entry.score ?? score
+      }
+    }
+    if (!name) return undefined
+    return typeof score === 'number' ? `${name}(${score.toFixed(2)})` : name
   }
 
   readMinutes(dayRequest?: string): Record<string, unknown> {

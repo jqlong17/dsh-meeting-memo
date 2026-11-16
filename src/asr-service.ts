@@ -367,14 +367,17 @@ export class AsrRuntime {
    * 转写刚落库就比对已登记的人；命中才写，没命中留空（面板显示未识别）。
    * 质心只在标签文件变化时重建，平时的开销就是一次 192 维点积。
    */
-  private assignLive(day: string, line: number, track: string, emb: string, device: string): void {
-    if (!this.embedModel) return
+  /** 拿当前质心判一下这条是谁；判不出来返回 null。 */
+  private matchLive(track: string, emb: string, device: string): { name: string; score: number } | null {
+    if (!this.embedModel) return null
     const vector = decodeEmbedding(emb)
-    if (!vector) return
-    const set = this.centroidsFor(day, device, track)
-    if (!set.centroids.size) return
-    const hit = matchSpeaker(vector, set)
-    if (!hit) return
+    if (!vector) return null
+    const set = this.centroidsFor(dayKey(this.timeZone), device, track)
+    if (!set.centroids.size) return null
+    return matchSpeaker(vector, set)
+  }
+
+  private writeAssignment(day: string, line: number, track: string, hit: { name: string; score: number }): void {
     try {
       setAssignment(this.home, day, line, {
         speaker: 'live',
@@ -537,6 +540,8 @@ export class AsrRuntime {
       const day = dayKey(this.timeZone, new Date(startAt))
       const emb = typeof event.emb === 'string' && event.emb ? event.emb : ''
       const device = typeof event.input === 'string' ? event.input : ''
+      // 先判定再落库：写进去的名字/分数是写这一行当时的快照，之后重算会更新旁边的分配表
+      const hit = emb ? this.matchLive(track, emb, device) : null
       appendSnippet(this.logRoot(), {
         day,
         startAt,
@@ -546,9 +551,10 @@ export class AsrRuntime {
         ...(typeof event.audio === 'string' ? { audio: event.audio } : {}),
         ...(emb ? { emb } : {}),
         ...(device ? { input: device } : {}),
+        ...(hit ? { speaker: hit.name, speakerScore: hit.score } : {}),
       })
       this.snippetLine += 1
-      if (emb) this.assignLive(day, this.snippetLine, track, emb, device)
+      if (hit) this.writeAssignment(day, this.snippetLine, track, hit)
       this.lastSnippetAt = endAt
       return
     }

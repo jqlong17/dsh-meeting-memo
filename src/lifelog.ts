@@ -24,6 +24,9 @@ export interface Segment {
   source?: string
   /** 这个片段的原始 wav 路径（仅在保存原音时存在）。 */
   audio?: string
+  /** 写入时的说话人快照与相似度。 */
+  speaker?: string
+  speakerScore?: number
   /** 合并后保留的所有原始行号；单行时与 line 相同。 */
   lines?: number[]
   /** 1-based physical line number in snippets.jsonl. */
@@ -232,6 +235,8 @@ export function readDay(root: string, day: string, timeZone: string): DayData {
       line: lineIndex + 1,
       ...(typeof row.source === 'string' && row.source ? { source: row.source } : {}),
       ...(typeof row.audio === 'string' && row.audio ? { audio: row.audio } : {}),
+      ...(typeof row.speaker === 'string' && row.speaker ? { speaker: row.speaker } : {}),
+      ...(typeof row.speakerScore === 'number' ? { speakerScore: row.speakerScore } : {}),
     })
   }
   if (snippetBad > 0) warnings.push(`snippets.jsonl 有 ${snippetBad} 行无法解析，已跳过`)

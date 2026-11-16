@@ -14,6 +14,9 @@ export interface SegmentDTO {
   lines?: number[]
   /** 原始 wav 路径（保存原音时才有）。 */
   audio?: string
+  /** 说话人快照与相似度（写入时判定；权威值在分配表里）。 */
+  speaker?: string
+  speakerScore?: number
 }
 
 export interface BucketDTO {
