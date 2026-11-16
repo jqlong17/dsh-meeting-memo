@@ -138,8 +138,9 @@ function renderTimeline(buckets: Array<{ m: number; s: number }>, windowStart: n
 function renderTranscript(
   segments: Array<{ s: number; e: number; track: string; text: string; line?: number; lines?: number[] }>,
   assignments: Record<string, { speaker: string; name?: string }>,
-  limit = 150,
+  limit = 4000,
 ): string {
+  // 一整天也就几百段，整份给出来，手机端选区过滤才有意义。
   const rows = [...segments].reverse().slice(0, limit)
   if (!rows.length) return '<p class="empty">这段时间还没有转写。</p>'
   const html = rows.map((segment) => {
