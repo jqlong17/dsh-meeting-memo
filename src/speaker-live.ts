@@ -215,25 +215,31 @@ export function buildCentroids(
     byDay.set(day, { emb, audio, track: trackOf })
   }
 
+  // 一行只归一个人：同一行后来被标成别人时，以最新那条为准，避免两边质心都被污染
+  const owner = new Map<string, string>()
+  for (const label of [...labels].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))) {
+    for (const line of label.lines ?? []) owner.set(`${label.day}:${line}`, label.label)
+  }
+
   const grouped = new Map<string, Vector[]>()
   const needs: Array<{ key: string; audio: string }> = []
-  for (const label of labels) {
-    const rows = byDay.get(label.day)
+  for (const [key, name] of owner) {
+    const [dayText, lineText] = key.split(':')
+    const rows = byDay.get(dayText)
     if (!rows) continue
-    for (const line of label.lines ?? []) {
-      if (track && rows.track.get(line) !== track) continue
-      const vector = rows.emb.get(line)
-      if (vector) {
-        const list = grouped.get(label.label) ?? []
-        list.push(vector)
-        grouped.set(label.label, list)
-        samples += 1
-        continue
-      }
-      // 老片段没向量：从 wav 补算一次，结果落缓存
-      const audio = rows.audio.get(line)
-      if (audio) needs.push({ key: `${label.day}:${line}`, audio })
+    const line = Number(lineText)
+    if (track && rows.track.get(line) !== track) continue
+    const vector = rows.emb.get(line)
+    if (vector) {
+      const list = grouped.get(name) ?? []
+      list.push(vector)
+      grouped.set(name, list)
+      samples += 1
+      continue
     }
+    // 老片段没向量：从 wav 补算一次，结果落缓存
+    const audio = rows.audio.get(line)
+    if (audio) needs.push({ key, audio })
   }
 
   if (home && needs.length) {
@@ -243,12 +249,11 @@ export function buildCentroids(
       if (!encoded) continue
       const vector = decodeEmbedding(encoded)
       if (!vector) continue
-      const [day, line] = need.key.split(':')
-      const label = labels.find((item) => item.day === day && (item.lines ?? []).includes(Number(line)))
-      if (!label) continue
-      const list = grouped.get(label.label) ?? []
+      const name = owner.get(need.key)
+      if (!name) continue
+      const list = grouped.get(name) ?? []
       list.push(vector)
-      grouped.set(label.label, list)
+      grouped.set(name, list)
       samples += 1
     }
   }
