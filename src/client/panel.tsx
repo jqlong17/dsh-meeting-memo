@@ -1280,11 +1280,6 @@ export function Panel(props: PanelProps) {
             }}
             last2hDisabled={!onToday}
             allDisabled={!data}
-            extra={(
-              <span style={{ ...smallStyle, color: speaker?.audioOn ? FG2 : WARN }}>
-                {speaker?.audioOn ? t('panel.speaker.audioOn') : t('panel.speaker.audioOff')}
-              </span>
-            )}
           />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0 6px', flexWrap: 'wrap' }}>
