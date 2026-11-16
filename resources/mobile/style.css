@@ -22,6 +22,12 @@
 
 * { box-sizing: border-box; }
 
+/* 页面本身不缩放：捏合只有时间轴上才有意义，否则到处误触。 */
+html,
+body {
+  touch-action: pan-y;
+}
+
 body {
   margin: 0;
   background: var(--bg);
