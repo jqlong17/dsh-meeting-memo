@@ -31,5 +31,14 @@ chmod +x "$bin"
 codesign --force --sign - "$bin" >/dev/null 2>&1
 rm -f "$tmp"
 
+echo "[build-native] building embed tool"
+RUNTIME="$home/runtimes/sherpa-onnx-v2.0.1-osx-arm64-shared-no-tts"
+if [ -d "$RUNTIME" ]; then
+  swiftc -O -import-objc-header "$repo/native/bridge.h" "$repo/native/embed.swift" \
+    -I "$RUNTIME/include" -L "$RUNTIME/lib" -lsherpa-onnx-c-api \
+    -Xlinker -rpath -Xlinker "$RUNTIME/lib" -o "$home/bin/embed"
+  codesign --force --sign - "$home/bin/embed" >/dev/null 2>&1
+  echo "[build-native] installed $home/bin/embed"
+fi
 echo "[build-native] installed $bin"
 "$bin" inputs 2>/dev/null | head -1

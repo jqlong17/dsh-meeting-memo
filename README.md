@@ -42,6 +42,23 @@ dsh plugin --profile <你的 profile> add github:jqlong17/dsh-meeting-memo
 
 标签存在 `speaker-labels.json`，和 wav 一起构成「时间区间 + 人工标签 + 原音」的素材，后面接音色分离/声纹聚类时直接可用。
 
+
+## 声纹（说话人识别）
+
+`sherpa-onnx` 的 CAM++ 声纹模型可以把一段音频压成 192 维向量，两条向量余弦相似度就是"像不像同一个人"。
+
+验证脚本（需要先 `npm run build:native`，会顺带编译 `bin/embed`）：
+
+```bash
+python3 scripts/speaker-eval.py 2026-11-16
+```
+
+用当天已标注片段做留一验证，再用这些人的质心给全天片段分配说话人。当前实测：
+
+- 留一验证 22/22 正确
+- 同人相似度均值 0.870、异人 0.195
+- 全天 125 个片段，阈值 0.65 时 74% 能归到已登记的人，其余标为未识别
+
 ## 手机上看
 
 DSH Pocket iOS → 「插件」→ 会议纪要 → 打开，就能看到今天采集了多少、以及最近几天的纪要。
