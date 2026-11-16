@@ -256,6 +256,7 @@ export function Panel(props: PanelProps) {
   const [spkEnd, setSpkEnd] = useState<number | null>(null)
   const [spkLabel, setSpkLabel] = useState('')
   const [spkNote, setSpkNote] = useState('')
+  const [spkView, setSpkView] = useState<'tag' | 'saved'>('tag')
   const [, setTick] = useState(0)
   const [editing, setEditing] = useState<EditState | null>(null)
   const [confirmId, setConfirmId] = useState('')
@@ -1092,135 +1093,160 @@ export function Panel(props: PanelProps) {
   const renderSpeaker = () => {
     const onToday = Boolean(data && data.day === data.today)
     const now = clockNow()
-    const hasRange = spkStart !== null && spkEnd !== null
-    const rangeStart = spkStart ?? Math.max(data?.window.start ?? 0, now - 10)
-    const rangeEnd = spkEnd ?? now
+    const range = {
+      start: spkStart ?? Math.max(data?.window.start ?? 0, now - 10),
+      end: spkEnd ?? now,
+    }
+    const minutes = Math.max(0, Math.round(range.end - range.start))
+    const bucketsInRange = (data?.buckets ?? []).filter((bucket) => (
+      bucket.m >= Math.floor(range.start) && bucket.m < Math.ceil(range.end)
+    ))
+    const capturedMinutes = bucketsInRange.length
+    const speechMinutes = bucketsInRange.reduce((sum, bucket) => sum + Math.max(0, bucket.s), 0) / 60
+    const rows = (data?.segments ?? []).filter((segment) => (
+      segment.e > range.start && segment.s < range.end
+    ))
     const groups = speaker?.groups ?? []
     return (
-      <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
-        <div style={{ ...smallStyle, lineHeight: 1.55, marginBottom: 6 }}>{t('panel.speaker.hint')}</div>
-        {renderNotices()}
+      <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: '0 0 auto', padding: '6px 10px 0' }}>
+          <RangeSelector
+            t={t}
+            buckets={data?.buckets ?? []}
+            windowStart={data?.window.start ?? 0}
+            windowEnd={data?.window.end ?? 1440}
+            selection={range}
+            now={onToday ? now : null}
+            minutes={minutes}
+            captureMinutes={capturedMinutes}
+            speechMinutes={speechMinutes}
+            onDraft={(next) => { setSpkStart(next.start); setSpkEnd(next.end) }}
+            onCommit={(next) => { setSpkStart(next.start); setSpkEnd(next.end) }}
+            onLast2h={() => {
+              setSpkStart(Math.max(data?.window.start ?? 0, clockNow() - 120))
+              setSpkEnd(clockNow())
+            }}
+            onAll={() => {
+              if (!data) return
+              setSpkStart(data.window.start)
+              setSpkEnd(data.window.end)
+            }}
+            last2hDisabled={!onToday}
+            allDisabled={!data}
+            extra={(
+              <span style={{ ...smallStyle, color: speaker?.audioOn ? FG2 : WARN }}>
+                {speaker?.audioOn ? t('panel.speaker.audioOn') : t('panel.speaker.audioOff')}
+              </span>
+            )}
+          />
 
-        <div style={{ ...cardStyle }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            marginBottom: 6,
-            fontSize: FS.xs,
-            lineHeight: 1.5,
-            color: speaker?.audioOn ? FG2 : WARN,
-          }}>
-            <span style={{
-              width: 6,
-              height: 6,
-              borderRadius: RADIUS_PILL,
-              background: speaker?.audioOn ? SUCCESS : WARN,
-              flex: '0 0 auto',
-            }} />
-            <span>{speaker?.audioOn ? t('panel.speaker.audioOn') : t('panel.speaker.audioOff')}</span>
-          </div>
-
-          {data ? (
-            <TimelineChart
-              buckets={data.buckets}
-              start={data.window.start}
-              end={data.window.end}
-              height={150}
-              selection={{ start: rangeStart, end: rangeEnd }}
-              now={onToday ? now : null}
-              labels={{
-                density: t('panel.spk.lane'),
-                hint: t('panel.spk.laneHint'),
-                gap: t('panel.legend.gap'),
-                speech: t('panel.legend.speech'),
-                now: t('panel.now'),
-              }}
-              formatTime={(minute) => clock(minute)}
-              onCommit={(range) => { setSpkStart(range.start); setSpkEnd(range.end); setSpkLabel(spkLabel) }}
-            />
-          ) : null}
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0 6px', flexWrap: 'wrap' }}>
             <button
               type="button"
-              style={spkStart === null ? primaryButtonStyle : buttonStyle}
+              style={buttonStyle}
               disabled={!onToday}
-              onClick={() => { setSpkStart(now); setSpkEnd(null) }}
-            >
-              {t('panel.speaker.markStart')}
-            </button>
+              onClick={() => { setSpkStart(clockNow()); setSpkEnd(null) }}
+            >{t('panel.speaker.markStart')}</button>
             <button
               type="button"
-              style={spkStart !== null && spkEnd === null ? primaryButtonStyle : buttonStyle}
+              style={buttonStyle}
               disabled={!onToday || spkStart === null}
               onClick={() => setSpkEnd(clockNow())}
-            >
-              {t('panel.speaker.markEnd')}
-            </button>
-            {spkStart !== null ? (
-              <button type="button" style={buttonStyle} onClick={() => { setSpkStart(null); setSpkEnd(null) }}>
-                {t('panel.speaker.reset')}
-              </button>
-            ) : null}
-            <span style={{ flex: '1 1 auto' }} />
-            <span style={{ ...smallStyle, fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
-              {spkStart === null ? t('panel.speaker.waiting') : `${clock(spkStart, true)} – ${spkEnd === null ? t('panel.now') : clock(spkEnd, true)}`}
-            </span>
+            >{t('panel.speaker.markEnd')}</button>
+            <button
+              type="button"
+              style={buttonStyle}
+              onClick={() => { setSpkStart(null); setSpkEnd(null) }}
+            >{t('panel.speaker.reset')}</button>
           </div>
+        </div>
 
-          {hasRange ? (
-            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <input
-                style={{ ...inputStyle }}
-                value={spkLabel}
-                placeholder={t('panel.speaker.labelHint')}
-                onChange={(event) => setSpkLabel(event.target.value)}
-                onKeyDown={(event) => { if (event.key === 'Enter') void saveSpeaker() }}
-              />
-              <input
-                style={{ ...inputStyle }}
-                value={spkNote}
-                placeholder={t('panel.speaker.note')}
-                onChange={(event) => setSpkNote(event.target.value)}
-              />
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ flex: '0 0 auto', padding: '0 10px 6px', display: 'flex', gap: 6, alignItems: 'center', borderBottom: `1px solid ${BORDER}` }}>
+          <button type="button" style={chipStyle(spkView === 'tag')} onClick={() => setSpkView('tag')}>{t('panel.speaker.viewTag')}</button>
+          <button type="button" style={chipStyle(spkView === 'saved')} onClick={() => setSpkView('saved')}>
+            {t('panel.speaker.viewSaved')} {speaker?.total ? ` ${speaker.total}` : ''}
+          </button>
+        </div>
+
+        {spkView === 'tag' ? (
+          <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '8px 10px 16px' }}>
+            <div style={{ ...cardStyle }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ ...smallStyle, fontWeight: 600 }}>{t('panel.speaker.label')}</span>
+                <input
+                  style={{ ...inputStyle, flex: '1 1 140px', minWidth: 0 }}
+                  value={spkLabel}
+                  placeholder={t('panel.speaker.labelHint')}
+                  onChange={(event) => setSpkLabel(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') void saveSpeaker() }}
+                />
+                <input
+                  style={{ ...inputStyle, flex: '1 1 120px', minWidth: 0 }}
+                  value={spkNote}
+                  placeholder={t('panel.speaker.note')}
+                  onChange={(event) => setSpkNote(event.target.value)}
+                />
                 <button type="button" style={primaryButtonStyle} onClick={() => void saveSpeaker()}>
                   {t('panel.speaker.save')}
                 </button>
               </div>
+              {renderNotices()}
+              <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.5 }}>{t('panel.speaker.hint')}</div>
             </div>
-          ) : null}
-        </div>
 
-        <div style={{ ...smallStyle, margin: '10px 0 6px', display: 'flex', gap: 8 }}>
-          <span>{t('panel.speaker.count').replace('{n}', String(speaker?.total ?? 0))}</span>
-        </div>
-        {groups.length === 0 ? (
-          <div style={{ ...smallStyle, lineHeight: 1.6 }}>{t('panel.speaker.empty')}</div>
-        ) : groups.map((group) => (
-          <div key={group.day}>
-            <div style={{ ...smallStyle, fontWeight: 600, margin: '10px 0 4px' }}>{group.day}</div>
-            {group.items.map((item) => (
-              <div key={item.id} style={{ ...cardStyle, padding: '8px 10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2, fontVariantNumeric: 'tabular-nums' }}>
-                    {clock(item.start, true)}–{clock(item.end, true)}
-                  </span>
-                  <span style={{ fontSize: FS.sm, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {item.label}
-                  </span>
-                  <span style={{ flex: '1 1 auto' }} />
-                  <span style={{ ...smallStyle }}>{t('panel.speaker.audioCount').replace('{n}', String(item.audioCount ?? 0))}</span>
-                  <button type="button" style={{ ...buttonStyle, color: DANGER }} onClick={() => void deleteSpeaker(item.id)}>
-                    {t('panel.speaker.delete')}
-                  </button>
-                </div>
-                {item.note ? <div style={{ ...smallStyle, marginTop: 3 }}>{item.note}</div> : null}
+            {rows.length === 0 ? (
+              <div style={{ ...smallStyle, lineHeight: 1.6, padding: '10px 0' }}>{t('panel.speaker.emptyRange')}</div>
+            ) : rows.map((segment, index) => (
+              <div
+                key={`${segment.s}-${index}`}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '62px 48px minmax(0, 1fr)',
+                  columnGap: 8,
+                  alignItems: 'start',
+                  padding: '5px 0',
+                  borderBottom: `1px solid ${BORDER}`,
+                }}
+              >
+                <span style={{ fontFamily: MONO, fontSize: FS.xs, lineHeight: '18px', color: CAPTION, fontVariantNumeric: 'tabular-nums' }}>
+                  {clock(segment.s, true)}
+                </span>
+                <span style={{ fontSize: FS.xs, lineHeight: '16px', color: trackColor(segment.track), whiteSpace: 'nowrap' }}>
+                  {trackName(segment.track, t)}
+                </span>
+                <span style={{ fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>{segment.text}</span>
               </div>
             ))}
           </div>
-        ))}
+        ) : (
+          <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '8px 10px 16px' }}>
+            {groups.length === 0 ? (
+              <div style={{ ...smallStyle, lineHeight: 1.6 }}>{t('panel.speaker.empty')}</div>
+            ) : groups.map((group) => (
+              <div key={group.day}>
+                <div style={{ ...smallStyle, fontWeight: 600, margin: '10px 0 4px' }}>{group.day}</div>
+                {group.items.map((item) => (
+                  <div key={item.id} style={{ ...cardStyle, padding: '8px 10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2, fontVariantNumeric: 'tabular-nums' }}>
+                        {clock(item.start, true)}–{clock(item.end, true)}
+                      </span>
+                      <span style={{ fontSize: FS.sm, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.label}
+                      </span>
+                      <span style={{ flex: '1 1 auto' }} />
+                      <span style={smallStyle}>{t('panel.speaker.audioCount').replace('{n}', String(item.audioCount ?? 0))}</span>
+                      <button type="button" style={{ ...buttonStyle, color: DANGER }} onClick={() => void deleteSpeaker(item.id)}>
+                        {t('panel.speaker.delete')}
+                      </button>
+                    </div>
+                    {item.note ? <div style={{ ...smallStyle, marginTop: 3 }}>{item.note}</div> : null}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     )
   }
@@ -1633,41 +1659,28 @@ export function Panel(props: PanelProps) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
         <div style={{ flex: '0 0 auto', padding: '6px 10px 0' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <span style={{ ...smallStyle, color: FG2, flex: '1 1 auto', minWidth: 0, lineHeight: '16px' }}>
-              {t('panel.selection')}
-              {' '}
-              <span style={{ fontFamily: MONO, color: FG }}>{clock(activeSelection.start)}–{clock(activeSelection.end)}</span>
-              {' '}
-              · {selectionMinutes} {t('unit.min')}
-              {' '}
-              · {t('panel.captured')} {selectionCapture} {t('unit.min')}
-              {' '}
-              · {t('panel.speech')} {selectionSpeech.toFixed(1)} {t('unit.min')}
-            </span>
-            {noticeError ? <span style={{ ...smallStyle, color: DANGER }}>{noticeError}</span> : null}
-            {notice ? <span style={{ ...smallStyle, color: FG2 }}>{notice}</span> : null}
-            <button type="button" style={buttonStyle} onClick={() => quickSelect('last2h')}>{t('panel.last2h')}</button>
-            <button type="button" style={buttonStyle} onClick={() => quickSelect('all')}>{t('panel.allDay')}</button>
-          </div>
-          <TimelineChart
+          <RangeSelector
+            t={t}
             buckets={data.buckets}
-            start={data.window.start}
-            end={data.window.end}
+            windowStart={data.window.start}
+            windowEnd={data.window.end}
             selection={activeSelection}
             now={now}
-            labels={{
-              density: t('panel.density'),
-              hint: t('panel.densityHint'),
-              gap: t('panel.legend.gap'),
-              speech: t('panel.legend.speech'),
-              now: t('panel.now'),
-            }}
+            minutes={selectionMinutes}
+            captureMinutes={selectionCapture}
+            speechMinutes={selectionSpeech}
             intervals={minuteIntervals}
             intervalsLabel={t('panel.today.minutesLane')}
-            formatTime={(minute) => clock(minute)}
             onDraft={handleDraft}
             onCommit={handleCommit}
+            onLast2h={() => quickSelect('last2h')}
+            onAll={() => quickSelect('all')}
+            extra={(
+              <>
+                {noticeError ? <span style={{ ...smallStyle, color: DANGER }}>{noticeError}</span> : null}
+                {notice ? <span style={{ ...smallStyle, color: FG2 }}>{notice}</span> : null}
+              </>
+            )}
           />
           <div style={{ ...smallStyle, display: 'flex', alignItems: 'center', gap: 6, minHeight: 18, padding: '2px 0 6px', whiteSpace: 'nowrap', overflow: 'hidden' }}>
             <span style={{ fontWeight: 600, flex: '0 0 auto' }}>{t('panel.todayStats')}</span>
@@ -2287,6 +2300,69 @@ function jobSeconds(job: JobDTO): number {
     if (Number.isFinite(started)) return Math.max(0, Math.floor((Date.now() - started) / 1000))
   }
   return Math.max(0, Math.round((job.elapsedMs ?? 0) / 1000))
+}
+
+/**
+ * 今日和说话人识别共用的「选区 + 时间轴」：一份交互，不要各写一套。
+ * 选区信息、快捷按钮、密度图（缩放 / 平移 / 拖拽）都在这里。
+ */
+function RangeSelector(props: {
+  t: (key: string) => string
+  buckets: Array<{ m: number; s: number }>
+  windowStart: number
+  windowEnd: number
+  selection: { start: number; end: number }
+  now: number | null
+  minutes: number
+  captureMinutes: number
+  speechMinutes: number
+  intervals?: Array<{ start: number; end: number; label?: string }>
+  intervalsLabel?: string
+  onDraft: (range: { start: number; end: number }) => void
+  onCommit: (range: { start: number; end: number }) => void
+  onLast2h: () => void
+  onAll: () => void
+  last2hDisabled?: boolean
+  allDisabled?: boolean
+  extra?: ReactNode
+}): ReactElement {
+  const { t } = props
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span style={{ ...smallStyle, color: FG2, flex: '1 1 auto', minWidth: 0, lineHeight: '16px' }}>
+          {t('panel.selection')}
+          {' '}
+          <span style={{ fontFamily: MONO, color: FG }}>{clock(props.selection.start)}–{clock(props.selection.end)}</span>
+          {' '}· {props.minutes} {t('unit.min')}
+          {' '}· {t('panel.captured')} {props.captureMinutes} {t('unit.min')}
+          {' '}· {t('panel.speech')} {props.speechMinutes.toFixed(1)} {t('unit.min')}
+        </span>
+        {props.extra}
+        <button type="button" style={buttonStyle} disabled={props.last2hDisabled} onClick={props.onLast2h}>{t('panel.last2h')}</button>
+        <button type="button" style={buttonStyle} disabled={props.allDisabled} onClick={props.onAll}>{t('panel.allDay')}</button>
+      </div>
+      <TimelineChart
+        buckets={props.buckets}
+        start={props.windowStart}
+        end={props.windowEnd}
+        selection={props.selection}
+        now={props.now}
+        labels={{
+          density: t('panel.density'),
+          hint: t('panel.densityHint'),
+          gap: t('panel.legend.gap'),
+          speech: t('panel.legend.speech'),
+          now: t('panel.now'),
+        }}
+        {...(props.intervals?.length ? { intervals: props.intervals } : {})}
+        {...(props.intervalsLabel ? { intervalsLabel: props.intervalsLabel } : {})}
+        formatTime={(minute) => clock(minute)}
+        onDraft={props.onDraft}
+        onCommit={props.onCommit}
+      />
+    </>
+  )
 }
 
 function JobBadge({ job, t }: { job: JobDTO; t: (key: string) => string }) {
