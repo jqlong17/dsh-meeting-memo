@@ -53,6 +53,45 @@ interface Persisted {
 
 const FILE = 'asr-service.json'
 
+/** 上一个 helper 的 pid：重载插件时旧进程可能没被回收，这里兜底清一次。 */
+function pidFile(home: string): string {
+  return path.join(home, 'asr-helper.pid')
+}
+
+function reapStaleHelper(home: string): void {
+  let pid = 0
+  try {
+    pid = Number(readFileSync(pidFile(home), 'utf8').trim())
+  } catch {
+    return
+  }
+  if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) return
+  try {
+    process.kill(pid, 0)
+  } catch {
+    return
+  }
+  // 只杀确实是我们的 helper，避免误伤同 pid 复用的其它进程
+  try {
+    const command = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+    if (!command.includes('asr-helper')) return
+  } catch {
+    // macOS 没有 /proc；用 ps 兜底
+    try {
+      const out = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' })
+      if (!out.includes('asr-helper')) return
+    } catch {
+      return
+    }
+  }
+  try {
+    process.kill(pid, 'SIGKILL')
+  } catch {
+    // 已经退出
+  }
+}
+
+
 function kanaHeavy(text: string): boolean {
   let kana = 0
   let han = 0
@@ -313,6 +352,7 @@ export class AsrRuntime {
   }
 
   private spawn(helper: string, model: AsrModel): void {
+    reapStaleHelper(this.home)
     const day = dayKey(this.timeZone)
     const audio = path.join(this.logRoot(), day, 'audio')
     const external = model.kind !== 'coreml-sensevoice'
@@ -321,6 +361,11 @@ export class AsrRuntime {
     const args = external
       ? ['capture', '--engine', 'external', '--audio', audio, '--mode', this.persisted.mode, '--language', this.persisted.language, ...inputArgs]
       : ['capture', '--model', model.path, '--mode', this.persisted.mode, '--language', this.persisted.language, ...(this.persisted.mode === 'raw' ? ['--audio', audio] : []), ...inputArgs]
+    try {
+      writeFileSync(pidFile(this.home), String(child.pid ?? ''), 'utf8')
+    } catch {
+      // 记不下来不影响采集
+    }
     const generation = ++this.generation
     this.runningModelId = model.id
     this.memory = []
