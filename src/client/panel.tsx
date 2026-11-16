@@ -770,6 +770,27 @@ export function Panel(props: PanelProps) {
     void loadSpeaker()
   }
 
+  const enrollRecent = async () => {
+    const name = spkLabel.trim()
+    if (!name) {
+      setNoticeError(t('panel.speaker.needLabel'))
+      return
+    }
+    const result = await rpc<{ samples: number }>('speaker.enrollRecent', {
+      day: data?.day,
+      label: name,
+      count: 3,
+    })
+    if (!result.ok) {
+      setNoticeError(result.error.message)
+      return
+    }
+    setNoticeError('')
+    setNotice(t('panel.speaker.enrolled').replace('{n}', String(result.value.samples)))
+    setSpkLabel('')
+    void loadSpeaker()
+  }
+
   const analyzeSpeakers = async () => {
     if (!data) return
     setSpkAnalyzing(true)
@@ -1318,6 +1339,9 @@ export function Panel(props: PanelProps) {
                 />
                 <button type="button" style={primaryButtonStyle} onClick={() => void saveSpeaker()}>
                   {t('panel.speaker.save')}
+                </button>
+                <button type="button" style={buttonStyle} onClick={() => void enrollRecent()}>
+                  {t('panel.speaker.enrollRecent')}
                 </button>
               </div>
               {spkPicked.length ? (

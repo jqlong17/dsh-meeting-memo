@@ -367,11 +367,11 @@ export class AsrRuntime {
    * 转写刚落库就比对已登记的人；命中才写，没命中留空（面板显示未识别）。
    * 质心只在标签文件变化时重建，平时的开销就是一次 192 维点积。
    */
-  private assignLive(day: string, line: number, track: string, emb: string): void {
+  private assignLive(day: string, line: number, track: string, emb: string, device: string): void {
     if (!this.embedModel) return
     const vector = decodeEmbedding(emb)
     if (!vector) return
-    const set = this.centroidsFor(day)
+    const set = this.centroidsFor(day, device)
     if (!set.centroids.size) return
     const hit = matchSpeaker(vector, set)
     if (!hit) return
@@ -388,17 +388,17 @@ export class AsrRuntime {
     }
   }
 
-  private centroidsFor(day: string): CentroidSet {
+  private centroidsFor(day: string, device: string): CentroidSet {
     let stamp = ''
     try {
       stamp = String(statSync(path.join(this.home, 'speaker-labels.json')).mtimeMs)
     } catch {
       stamp = '0'
     }
-    const key = `${day}:${stamp}`
+    const key = `${day}:${device}:${stamp}`
     if (this.centroids && this.centroidsKey === key) return this.centroids
     const labels = readLabels(this.home).filter((label) => label.day === day)
-    this.centroids = buildCentroids(this.logRoot(), day, labels, this.home)
+    this.centroids = buildCentroids(this.logRoot(), day, labels, this.home, device || undefined)
     this.centroidsKey = key
     return this.centroids
   }
@@ -532,6 +532,7 @@ export class AsrRuntime {
       const track = this.persisted.mode === 'merged' ? 'merged' : String(event.track || 'mic')
       const day = dayKey(this.timeZone, new Date(startAt))
       const emb = typeof event.emb === 'string' && event.emb ? event.emb : ''
+      const device = typeof event.input === 'string' ? event.input : ''
       appendSnippet(this.logRoot(), {
         day,
         startAt,
@@ -540,9 +541,10 @@ export class AsrRuntime {
         text,
         ...(typeof event.audio === 'string' ? { audio: event.audio } : {}),
         ...(emb ? { emb } : {}),
+        ...(device ? { input: device } : {}),
       })
       this.snippetLine += 1
-      if (emb) this.assignLive(day, this.snippetLine, track, emb)
+      if (emb) this.assignLive(day, this.snippetLine, track, emb, device)
       this.lastSnippetAt = endAt
       return
     }

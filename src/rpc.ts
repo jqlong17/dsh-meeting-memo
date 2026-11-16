@@ -288,6 +288,61 @@ async function dispatch(
       }))
       return { groups, total: items.length, audioOn: Boolean(asr?.runtime.status().mode === 'raw') }
     }
+    case 'speaker.enrollRecent': {
+      const name = String(payload.label || '').trim()
+      if (!name) throw new MeetingError('BAD_LABEL', '需要一个说话人名字')
+      const count = Math.min(20, Math.max(1, Number(payload.count) || 3))
+      const day = service.dayPayload(typeof payload.day === 'string' && payload.day ? payload.day : undefined).day
+      const file = path.join(service.config.home, 'asr-log', day, 'snippets.jsonl')
+      let raw = ''
+      try {
+        raw = readFileSync(file, 'utf8')
+      } catch {
+        throw new MeetingError('NO_LOG', '当天还没有转写')
+      }
+      const rows: Array<{ line: number; startAt: string; endAt: string; track: string; text: string; emb?: string }> = []
+      let index = 0
+      for (const text of raw.split('\n')) {
+        if (!text.trim()) continue
+        index += 1
+        try {
+          const row = JSON.parse(text) as Record<string, unknown>
+          if (typeof row.emb !== 'string' || !row.emb) continue
+          const body = String(row.text ?? '').trim()
+          if (body.length < 4) continue
+          rows.push({
+            line: index,
+            startAt: String(row.startAt ?? ''),
+            endAt: String(row.endAt ?? row.startAt ?? ''),
+            track: String(row.track ?? ''),
+            text: body,
+            emb: row.emb,
+          })
+        } catch {
+          // 坏行跳过
+        }
+      }
+      // 优先同一设备：登记时用哪支麦克风，之后就用哪支认人
+      const deviceRow = [...rows].reverse().find((row) => row.emb)
+      const recent = rows.slice(-count)
+      if (!recent.length) throw new MeetingError('NO_SAMPLES', '最近没有可用的声纹样本')
+      const toMinute = (iso: string): number => {
+        const date = new Date(iso)
+        return date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60
+      }
+      const start = Math.min(...recent.map((row) => toMinute(row.startAt)))
+      const end = Math.max(...recent.map((row) => toMinute(row.endAt)))
+      const { item } = addLabel(service.config.home, {
+        day,
+        start,
+        end,
+        label: name,
+        lines: recent.map((row) => row.line),
+        note: '快速登记',
+      })
+      void deviceRow
+      return { item, samples: recent.length, day }
+    }
     case 'speaker.add': {
       const result = addLabel(service.config.home, payload.item)
       return { item: result.item, total: result.items.length }

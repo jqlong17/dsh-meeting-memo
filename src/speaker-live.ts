@@ -167,6 +167,8 @@ export function buildCentroids(
   day: string,
   labels: SpeakerLabel[],
   home?: string,
+  /** 只统计这个设备录的样本：换麦克风后声纹会明显掉分，混在一起就会谁都认不出。 */
+  device?: string,
 ): CentroidSet {
   const centroids = new Map<string, Vector>()
   let samples = 0
@@ -179,10 +181,15 @@ export function buildCentroids(
   for (const raw of readFileSync(file, 'utf8').split('\n')) {
     if (!raw.trim()) continue
     index += 1
-    let row: { emb?: unknown; audio?: unknown }
+    let row: { emb?: unknown; audio?: unknown; input?: unknown }
     try {
-      row = JSON.parse(raw) as { emb?: unknown; audio?: unknown }
+      row = JSON.parse(raw) as { emb?: unknown; audio?: unknown; input?: unknown }
     } catch {
+      continue
+    }
+    if (device && (typeof row.input !== 'string' || row.input !== device)) {
+      // 设备不匹配的样本不参与质心
+      if (typeof row.audio === 'string') audioByLine.set(index, row.audio)
       continue
     }
     if (typeof row.audio === 'string') audioByLine.set(index, row.audio)

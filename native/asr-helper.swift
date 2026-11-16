@@ -601,6 +601,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
             ]
             if !audioPath.isEmpty { event["audio"] = audioPath }
             if let emb = embedder?.embedding(samples) { event["emb"] = emb }
+            if track == "mic", !inputName.isEmpty { event["input"] = inputName }
             emit(event)
         } catch {
             emit(["type": "error", "track": track, "message": "转写失败：\(error.localizedDescription)"])
