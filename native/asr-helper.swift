@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import CoreML
 import Foundation
 #if canImport(ScreenCaptureKit)
@@ -246,6 +247,59 @@ func writeWav(_ samples: [Float], to url: URL) throws {
     try data.write(to: url)
 }
 
+
+// MARK: - 输入设备
+
+struct InputDevice {
+    let id: AudioDeviceID
+    let uid: String
+    let name: String
+}
+
+func propertyAddress(_ selector: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
+    AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+}
+
+func deviceString(_ device: AudioDeviceID, _ selector: AudioObjectPropertySelector) -> String {
+    var address = propertyAddress(selector)
+    var value: CFString = "" as CFString
+    var size = UInt32(MemoryLayout<CFString>.size)
+    let status = withUnsafeMutablePointer(to: &value) { pointer in
+        AudioObjectGetPropertyData(device, &address, 0, nil, &size, pointer)
+    }
+    return status == noErr ? value as String : ""
+}
+
+func hasInput(_ device: AudioDeviceID) -> Bool {
+    var address = propertyAddress(kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeInput)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr, size > 0 else { return false }
+    let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+    defer { raw.deallocate() }
+    guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, raw) == noErr else { return false }
+    let list = UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
+    return list.contains { $0.mNumberChannels > 0 }
+}
+
+func inputDevices() -> [InputDevice] {
+    var address = propertyAddress(kAudioHardwarePropertyDevices)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size) == noErr else { return [] }
+    var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &ids) == noErr else { return [] }
+    return ids.filter { hasInput($0) }.map { id in
+        InputDevice(id: id, uid: deviceString(id, kAudioDevicePropertyDeviceUID), name: deviceString(id, kAudioObjectPropertyName))
+    }
+}
+
+func defaultInputID() -> AudioDeviceID? {
+    var address = propertyAddress(kAudioHardwarePropertyDefaultInputDevice)
+    var device = AudioDeviceID(0)
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr else { return nil }
+    return device == 0 ? nil : device
+}
+
 func downsample(_ buffer: AVAudioPCMBuffer, converter: AVAudioConverter, target: AVAudioFormat) -> [Float] {
     let ratio = target.sampleRate / buffer.format.sampleRate
     let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
@@ -288,12 +342,16 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     var converter: AVAudioConverter?
     var stream: SCStream?
     let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: 1, interleaved: false)!
+    /// 指定输入设备（UID）；为空则跟随系统默认。
+    let inputUID: String?
+    private(set) var inputName = ""
 
-    init(model: SenseVoice?, mode: String, language: String, audioRoot: String?) {
+    init(model: SenseVoice?, mode: String, language: String, audioRoot: String?, inputUID: String?) {
         self.model = model
         self.mode = mode
         self.language = language
         self.audioRoot = audioRoot
+        self.inputUID = inputUID
         super.init()
     }
 
@@ -301,12 +359,26 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         startMic()
         startSystem()
         minuteStart = Date()
-        emit(["type": "status", "phase": "running", "mic": engine != nil, "system": stream != nil])
+        emit(["type": "status", "phase": "running", "mic": engine != nil, "system": stream != nil, "input": inputName])
     }
 
     func startMic() {
         let engine = AVAudioEngine()
         let input = engine.inputNode
+        // 先把输入设备切到指定的那个（耳机麦 / 内置麦），再读格式。
+        let devices = inputDevices()
+        let chosen = inputUID.flatMap { uid in devices.first { $0.uid == uid } }
+        if let chosen, let unit = input.audioUnit {
+            var device = chosen.id
+            let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+                                              kAudioUnitScope_Global, 0, &device,
+                                              UInt32(MemoryLayout<AudioDeviceID>.size))
+            if status != noErr {
+                emit(["type": "error", "track": "mic", "message": "切换输入设备失败：\(chosen.name)"])
+            }
+        }
+        let actualID = chosen?.id ?? defaultInputID()
+        inputName = devices.first { $0.id == actualID }?.name ?? ""
         // 输入节点要用 inputFormat：outputFormat 是硬件处理后的渲染格式，
         // 两者在 USB 麦克风上可能不一致（48k 双声道 vs 44.1k），拿错会把样本算坏。
         let format = input.inputFormat(forBus: 0)
@@ -352,7 +424,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
                 try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
                 try await stream.startCapture()
                 self.stream = stream
-                emit(["type": "status", "phase": "running", "mic": self.engine != nil, "system": true])
+                emit(["type": "status", "phase": "running", "mic": self.engine != nil, "system": true, "input": self.inputName])
             } catch {
                 emit(["type": "error", "track": "system", "message": "系统声音未开启：\(error.localizedDescription)。需要给 DeepSeek Harness 屏幕录制权限。麦克风转写仍会继续。"])
             }
@@ -514,8 +586,16 @@ if command == "probe" {
     }
 }
 
+if command == "inputs" {
+    let list = inputDevices().map { device -> [String: Any] in
+        ["uid": device.uid, "name": device.name, "default": device.id == defaultInputID()]
+    }
+    emit(["type": "inputs", "items": list])
+    exit(0)
+}
+
 guard command == "capture" else {
-    fputs("usage: asr-helper capture --model DIR [--mode raw|tracks|merged] [--audio DIR]\n       asr-helper capture --engine external --audio DIR [--mode raw|tracks|merged]\n", stderr)
+    fputs("usage: asr-helper capture --model DIR [--mode raw|tracks|merged] [--audio DIR] [--input UID]\n       asr-helper capture --engine external --audio DIR [--mode raw|tracks|merged]\n       asr-helper inputs\n", stderr)
     exit(2)
 }
 
@@ -544,7 +624,7 @@ if external {
     }
     model = loaded
 }
-let capture = Capture(model: model, mode: mode, language: language, audioRoot: external || mode == "raw" ? audio : nil)
+let capture = Capture(model: model, mode: mode, language: language, audioRoot: external || mode == "raw" ? audio : nil, inputUID: arg("input"))
 signal(SIGINT, SIG_IGN)
 signal(SIGTERM, SIG_IGN)
 let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)

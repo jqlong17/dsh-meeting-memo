@@ -26,6 +26,12 @@ export interface AsrStatus {
   helper: string | null
   mic: boolean | null
   system: boolean | null
+  /** 正在使用的麦克风名字。 */
+  input: string
+  /** 指定的设备 UID；空表示跟随系统默认。 */
+  inputUID: string
+  /** 可选输入设备。 */
+  inputs: Array<{ uid: string; name: string; default?: boolean }>
   /** Whether audio frames actually arrive, not only whether speech was detected. */
   audio: AudioHealth
   audioRestarts: number
@@ -41,6 +47,8 @@ interface Persisted {
   enabled: boolean
   mode: AsrMode
   language: AsrLanguage
+  /** 指定麦克风设备 UID；空表示跟随系统默认。 */
+  input?: string
 }
 
 const FILE = 'asr-service.json'
@@ -93,12 +101,13 @@ function readPersisted(home: string): Persisted {
   const file = path.join(home, FILE)
   if (!existsSync(file)) return { enabled: true, mode: 'tracks', language: 'zhen' }
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { enabled?: unknown; mode?: unknown }
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { enabled?: unknown; mode?: unknown; language?: unknown; input?: unknown }
     const mode = parsed.mode === 'raw' || parsed.mode === 'merged' || parsed.mode === 'tracks' ? parsed.mode : 'tracks'
     const language = parsed.language === 'zh' || parsed.language === 'en' || parsed.language === 'auto' || parsed.language === 'zhen'
       ? parsed.language
       : 'zhen'
-    return { enabled: parsed.enabled !== false, mode, language }
+    const input = typeof parsed.input === 'string' && parsed.input.trim() ? parsed.input.trim() : undefined
+    return { enabled: parsed.enabled !== false, mode, language, ...(input ? { input } : {}) }
   } catch {
     return { enabled: true, mode: 'tracks', language: 'zhen' }
   }
@@ -137,6 +146,10 @@ export class AsrRuntime {
   private lastEventAt = 0
   /** Per-minute audio ticks, used to tell a quiet room from a dead input tap. */
   private audioTicks: Record<string, unknown>[] = []
+  /** 实际在用的麦克风名字，由 helper 上报。 */
+  private inputName = ''
+  /** 可用输入设备，启动时问一次 helper。 */
+  private inputs: Array<{ uid: string; name: string; default?: boolean }> = []
   private audioRestarts = 0
   private lastReconnectAt = 0
   private watchdog: ReturnType<typeof setInterval> | null = null
@@ -184,6 +197,9 @@ export class AsrRuntime {
       helper: this.helperPath,
       mic: this.mic,
       system: this.system,
+      input: this.inputName,
+      inputUID: this.persisted.input ?? '',
+      inputs: this.inputs,
       audio: audioHealthOf(this.audioTicks, this.system !== false),
       audioRestarts: this.audioRestarts,
       message: this.message,
@@ -204,6 +220,38 @@ export class AsrRuntime {
     }
     await this.start()
     return this.status()
+  }
+
+  /** 切换麦克风：空字符串表示跟随系统默认。 */
+  async setInput(uid: string): Promise<AsrStatus> {
+    const clean = uid.trim()
+    this.persisted = { ...this.persisted, ...(clean ? { input: clean } : {}) }
+    if (!clean) delete this.persisted.input
+    writePersisted(this.home, this.persisted)
+    if (this.persisted.enabled) await this.start()
+    return this.status()
+  }
+
+  /** 问 helper 有哪些输入设备（每次切换后刷新）。 */
+  async refreshInputs(): Promise<void> {
+    try {
+      const helper = await this.ensureHelper()
+      const out = await new Promise<string>((resolve, reject) => {
+        const child = spawn(helper, ['inputs'], { stdio: ['ignore', 'pipe', 'ignore'] })
+        let text = ''
+        child.stdout?.setEncoding('utf8')
+        child.stdout?.on('data', (chunk: string) => { text += chunk })
+        child.on('error', reject)
+        child.on('exit', () => resolve(text))
+      })
+      const line = out.split('\n').find((item) => item.includes('"type":"inputs"')) ?? ''
+      if (line) {
+        const parsed = JSON.parse(line) as { items?: Array<{ uid: string; name: string; default?: boolean }> }
+        this.inputs = parsed.items ?? []
+      }
+    } catch {
+      this.inputs = []
+    }
   }
 
   async setMode(mode: AsrMode): Promise<AsrStatus> {
@@ -250,6 +298,7 @@ export class AsrRuntime {
     this.message = '正在启动采集…'
     try {
       const helper = await this.ensureHelper()
+      void this.refreshInputs()
       this.spawn(helper, model)
     } catch (error) {
       this.phase = 'failed'
@@ -268,9 +317,10 @@ export class AsrRuntime {
     const audio = path.join(this.logRoot(), day, 'audio')
     const external = model.kind !== 'coreml-sensevoice'
     mkdirSync(audio, { recursive: true })
+    const inputArgs = this.persisted.input ? ['--input', this.persisted.input] : []
     const args = external
-      ? ['capture', '--engine', 'external', '--audio', audio, '--mode', this.persisted.mode, '--language', this.persisted.language]
-      : ['capture', '--model', model.path, '--mode', this.persisted.mode, '--language', this.persisted.language, ...(this.persisted.mode === 'raw' ? ['--audio', audio] : [])]
+      ? ['capture', '--engine', 'external', '--audio', audio, '--mode', this.persisted.mode, '--language', this.persisted.language, ...inputArgs]
+      : ['capture', '--model', model.path, '--mode', this.persisted.mode, '--language', this.persisted.language, ...(this.persisted.mode === 'raw' ? ['--audio', audio] : []), ...inputArgs]
     const generation = ++this.generation
     this.runningModelId = model.id
     this.memory = []
@@ -353,6 +403,7 @@ export class AsrRuntime {
       this.phase = 'running'
       this.mic = typeof event.mic === 'boolean' ? event.mic : this.mic
       this.system = typeof event.system === 'boolean' ? event.system : this.system
+      if (typeof event.input === 'string') this.inputName = event.input
       this.message = this.system === false
         ? '正在听麦克风。系统声音还没开（需要屏幕录制权限）。'
         : '正在录音并转写。'

@@ -913,6 +913,15 @@ export function Panel(props: PanelProps) {
     setAsr(result.value)
   }
 
+  const setAsrInput = async (uid: string) => {
+    const result = await rpc<AsrStatusDTO>('asr.set', { input: uid })
+    if (!result.ok) {
+      setNoticeError(result.error.message)
+      return
+    }
+    setAsr(result.value)
+  }
+
   const setAsrMode = async (mode: AsrStatusDTO['mode']) => {
     const result = await rpc<AsrStatusDTO>('asr.set', { mode })
     if (!result.ok) {
@@ -1539,6 +1548,22 @@ export function Panel(props: PanelProps) {
               </div>
             )
           })}
+          {(asr?.inputs?.length ?? 0) > 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: FS.xs, fontWeight: 600 }}>{t('panel.asr.input')}</span>
+              <select
+                style={{ ...selectStyle, maxWidth: '100%', flex: '1 1 160px' }}
+                value={asr?.inputUID ?? ''}
+                onChange={(event) => void setAsrInput(event.target.value)}
+              >
+                <option value="">{t('panel.asr.inputAuto')}</option>
+                {(asr?.inputs ?? []).map((device) => (
+                  <option key={device.uid} value={device.uid}>{device.name}</option>
+                ))}
+              </select>
+              {asr?.input ? <span style={smallStyle}>{t('panel.asr.inputUsing')} {asr.input}</span> : null}
+            </div>
+          ) : null}
           <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.45 }}>{t('panel.asr.health.hint')}</div>
         </div>
 

@@ -174,6 +174,7 @@ async function dispatch(
         return runtime.setLanguage(payload.language)
       }
       if (typeof payload.enabled === 'boolean') return runtime.setEnabled(payload.enabled)
+      if (typeof payload.input === 'string') return runtime.setInput(payload.input)
       throw new MeetingError('BAD_ASR', '缺少 enabled 或 mode')
     }
     case 'speaker.assignments': {
