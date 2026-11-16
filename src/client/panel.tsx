@@ -263,8 +263,6 @@ export function Panel(props: PanelProps) {
   const [spkPicked, setSpkPicked] = useState<string[]>([])
   const [assign, setAssign] = useState<Record<string, { speaker: string; name?: string; track: string }>>({})
   const loadAssignRef = useRef<(day: string) => Promise<void>>(async () => {})
-  const [spkAnalyzing, setSpkAnalyzing] = useState(false)
-  const [spkThreshold, setSpkThreshold] = useState(0.75)
   const [, setTick] = useState(0)
   const [editing, setEditing] = useState<EditState | null>(null)
   const [confirmId, setConfirmId] = useState('')
@@ -791,29 +789,6 @@ export function Panel(props: PanelProps) {
     void loadSpeaker()
   }
 
-  const analyzeSpeakers = async () => {
-    if (!data) return
-    setSpkAnalyzing(true)
-    setNoticeError('')
-    try {
-      const result = await rpc<{ speakers: number; lines: number; named: number; names: string[] }>(
-        'speaker.analyze', { day: data.day, threshold: spkThreshold },
-      )
-      if (!result.ok) {
-        setNoticeError(result.error.hint ? `${result.error.message} · ${result.error.hint}` : result.error.message)
-        return
-      }
-      const value = result.value
-      setNotice(`${t('panel.speaker.analyzed')
-        .replace('{s}', String(value.speakers))
-        .replace('{l}', String(value.lines))
-        .replace('{n}', String(value.named))}${value.names.length ? ` · ${value.names.join('、')}` : ''}`)
-      void loadAssign(data.day)
-    } finally {
-      setSpkAnalyzing(false)
-    }
-  }
-
   const deleteSpeaker = async (id: string) => {
     const result = await rpc('speaker.delete', { id })
     if (!result.ok) setNoticeError(result.error.message)
@@ -1288,27 +1263,6 @@ export function Panel(props: PanelProps) {
               style={buttonStyle}
               onClick={() => { setSpkStart(null); setSpkEnd(null) }}
             >{t('panel.speaker.reset')}</button>
-            <button
-              type="button"
-              style={buttonStyle}
-              disabled={spkAnalyzing}
-              onClick={() => void analyzeSpeakers()}
-            >{spkAnalyzing ? t('panel.speaker.analyzing') : t('panel.speaker.analyze')}</button>
-            <span style={{ ...smallStyle, whiteSpace: 'nowrap' }}>{t('panel.speaker.threshold')}</span>
-            <input
-              type="number"
-              min={0.5}
-              max={0.99}
-              step={0.05}
-              value={spkThreshold}
-              disabled={spkAnalyzing}
-              onChange={(event) => {
-                const next = Number(event.target.value)
-                if (Number.isFinite(next)) setSpkThreshold(Math.min(0.99, Math.max(0.5, next)))
-              }}
-              style={{ ...inputStyle, width: 64, fontFamily: MONO }}
-              title={t('panel.speaker.thresholdHint')}
-            />
           </div>
         </div>
 
