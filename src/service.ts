@@ -12,7 +12,9 @@ import { DAY_RE, detectLifelogRoot, listDayDirs } from './config.ts'
 import type { MeetingConfig } from './config.ts'
 import { listSources, readSelectedRoot, writeSelectedRoot } from './source.ts'
 import { asrLogRoot } from './asr-log.ts'
+import { buildIndexCopy } from './copy-index.ts'
 import { readAssignments } from './speaker-assignments.ts'
+import { readLabels } from './speaker-labels.ts'
 import { dayStats, formatClock, hourlySummary, nowMinuteOfDay, parseClock, readDay, sliceRange, todayKey } from './lifelog.ts'
 import type { DayData } from './lifelog.ts'
 import {
@@ -675,8 +677,22 @@ export class MeetingService {
     }
   }
 
+  /** 人物表：标签里写的备注就是这个人在这批会议里的角色，喂给模型。 */
+  peopleRoster(): string {
+    const seen = new Map<string, string>()
+    for (const label of readLabels(this.config.home)) {
+      const note = (label.note ?? '').trim()
+      if (!note || note === '快速登记') continue
+      seen.set(label.label, note)
+    }
+    if (!seen.size) return ''
+    return `[人物] ${[...seen].map(([name, note]) => `${name}：${note}`).join('；')}`
+  }
+
   transcript(dayRequest: string | undefined, startValue: unknown, endValue: unknown, maxChars = 24_000): Record<string, unknown> {
     const payload = this.range(dayRequest, startValue, endValue, { maxChars })
+    const roster = this.peopleRoster()
+    if (roster) payload.text = `${roster}\n${payload.text}`
     return {
       day: payload.day,
       range: { start: formatClock(payload.start), end: formatClock(payload.end) },
@@ -709,6 +725,28 @@ export class MeetingService {
     }
     if (!name) return undefined
     return typeof score === 'number' ? `${name}(${score.toFixed(2)})` : name
+  }
+
+
+  /**
+   * 复制纪要时附上的「原文索引」：文件路径 + 行号区间，
+   * 让后面的模型能直接回到 snippets.jsonl 读原话，而不是再转写一遍。
+   */
+  indexFor(dayRequest: string | undefined, startValue: unknown, endValue: unknown): { text: string } {
+    const { day, data, root } = this.loadDay(dayRequest)
+    const start = parseClock(startValue, 0)
+    const end = parseClock(endValue, 1440)
+    const slice = sliceRange(data, start, end, { withText: false })
+    const text = buildIndexCopy({
+      day,
+      file: path.join(root, day, 'snippets.jsonl'),
+      sourceLabel: undefined,
+      segments: slice.segments.map((segment) => ({ s: segment.s, e: segment.e, line: segment.line, lines: segment.lines })),
+      selection: { start: slice.start, end: slice.end },
+      trackLabel: '全部',
+      filtered: false,
+    })
+    return { text }
   }
 
   readMinutes(dayRequest?: string): Record<string, unknown> {

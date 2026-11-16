@@ -112,6 +112,12 @@ async function dispatch(
       }).filter((group) => group.sessions.length > 0)
       return { mode, today, days: all, groups, total: groups.reduce((sum, group) => sum + group.sessions.length, 0) }
     }
+    case 'minutes.index':
+      return service.indexFor(
+        typeof payload.day === 'string' && payload.day ? payload.day : undefined,
+        payload.start,
+        payload.end,
+      )
     case 'minutes.generate':
     case 'minutes.draft': {
       const day = typeof payload.day === 'string' ? payload.day : undefined

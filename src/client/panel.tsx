@@ -806,6 +806,15 @@ export function Panel(props: PanelProps) {
     void loadSpeaker()
   }
 
+  /** 复制纪要时连带原文索引（文件 + 行号），方便回头查原话。 */
+  const copySession = async (session: MinuteSessionDTO, day: string, key: string) => {
+    const body = sessionBody(session as unknown as Record<string, unknown>)
+    const head = `## ${clock(session.start)}–${clock(session.end)} · ${session.topic}\n\n${body}\n`
+    const index = await rpc<{ text: string }>('minutes.index', { day, start: session.start, end: session.end })
+    const text = index.ok && index.value.text ? `${head}\n---\n${index.value.text}\n` : head
+    void copyText(text, key)
+  }
+
   const deleteSpeaker = async (id: string) => {
     const result = await rpc('speaker.delete', { id })
     if (!result.ok) setNoticeError(result.error.message)
@@ -2099,10 +2108,7 @@ export function Panel(props: PanelProps) {
                           <button
                             type="button"
                             style={buttonStyle}
-                            onClick={() => {
-                              const text = `## ${clock(session.start)}–${clock(session.end)} · ${session.topic}\n\n${body}\n`
-                              void copyText(text, `range-${key}`)
-                            }}
+                            onClick={() => void copySession(session, group.day, `range-${key}`)}
                           >
                             {flash === `range-${key}` ? t('panel.minutes.copied') : t('panel.minutes.copy')}
                           </button>
@@ -2162,11 +2168,7 @@ export function Panel(props: PanelProps) {
                 <button
                   type="button"
                   style={buttonStyle}
-                  onClick={() => {
-                    const body = sessionBody(session as unknown as Record<string, unknown>)
-                    const text = `## ${clock(session.start)}–${clock(session.end)} · ${session.topic}\n\n${body}\n`
-                    void copyText(text, `md-${session.id}`)
-                  }}
+                  onClick={() => void copySession(session, minutes?.day ?? data?.day ?? '', `md-${session.id}`)}
                 >
                   {flash === `md-${session.id}` ? t('panel.minutes.copied') : t('panel.minutes.copy')}
                 </button>
