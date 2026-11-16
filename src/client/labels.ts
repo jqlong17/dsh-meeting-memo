@@ -229,6 +229,7 @@ export const zh = {
   'panel.asr.phase.paused': '已暂停',
   'panel.asr.phase.failed': '失败',
 
+  'panel.jumpLatest': '定位到最新',
   'panel.refresh': '刷新',
   'panel.refreshing': '刷新中',
   'panel.loading': '正在读取本地转写日志…',
@@ -560,6 +561,7 @@ export const en: Record<keyof Labels, string> = {
   'panel.asr.phase.paused': 'Paused',
   'panel.asr.phase.failed': 'Failed',
 
+  'panel.jumpLatest': 'Jump to latest',
   'panel.refresh': 'Refresh',
   'panel.refreshing': 'Refreshing',
   'panel.loading': 'Reading the local transcript log…',

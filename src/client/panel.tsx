@@ -276,6 +276,8 @@ export function Panel(props: PanelProps) {
   const dayRef = useRef('')
   const loadDayRef = useRef<(target?: string, forceServerSelection?: boolean) => Promise<void>>(async () => {})
   const listRef = useRef<HTMLDivElement | null>(null)
+  // 用户手动往上翻之后就不再自动跳到最新
+  const [followLatest, setFollowLatest] = useState(true)
   const flashTimer = useRef<number | null>(null)
   const seenDoneJobs = useRef<Set<string>>(new Set())
   const jobsSeeded = useRef(false)
@@ -575,10 +577,15 @@ export function Panel(props: PanelProps) {
 
   useEffect(() => {
     const list = listRef.current
-    if (!list) return
-    // 倒序展示后，新内容出现在顶部，所以始终回到顶部
+    if (!list || !followLatest) return
+    // 倒序展示后新内容出现在顶部；只有跟随时才自动回到顶部
     list.scrollTop = 0
-  }, [activeSelection.start, activeSelection.end, track, segments.length, data?.day, data?.today])
+  }, [activeSelection.start, activeSelection.end, track, segments.length, data?.day, data?.today, followLatest])
+
+  // 换天或换选区时重新跟随
+  useEffect(() => {
+    setFollowLatest(true)
+  }, [data?.day])
 
   // 复制出去仍按时间正序，方便阅读和喂给模型
   const transcriptText = useMemo(() => segments.slice(-700)
@@ -1999,7 +2006,14 @@ export function Panel(props: PanelProps) {
                 : null}
             </div>
           </div>
-          <div ref={listRef} style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '2px 10px 12px' }}>
+          <div
+            ref={listRef}
+            onScroll={(event) => {
+              // 回到顶部就恢复跟随；往下翻就停住，别抢用户的位置
+              setFollowLatest(event.currentTarget.scrollTop <= 4)
+            }}
+            style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '2px 10px 12px' }}
+          >
             {visibleSegments.length === 0
               ? <div style={{ ...smallStyle, lineHeight: 1.6, padding: '10px 0' }}>{emptyText || t('panel.transcript.empty')}</div>
               : visibleSegments.map((segment, index) => {
@@ -2256,6 +2270,21 @@ export function Panel(props: PanelProps) {
             ))}
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 6, flex: '0 0 auto' }}>
+            {tab === 'today' ? (
+              <button
+                type="button"
+                style={{
+                  ...buttonStyle,
+                  ...(followLatest ? {} : { borderColor: ACCENT, color: ACCENT }),
+                }}
+                onClick={() => {
+                  setFollowLatest(true)
+                  if (listRef.current) listRef.current.scrollTop = 0
+                }}
+              >
+                {t('panel.jumpLatest')}
+              </button>
+            ) : null}
             <button
               type="button"
               style={buttonStyle}
