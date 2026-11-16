@@ -1316,7 +1316,7 @@ export function Panel(props: PanelProps) {
                 key={key}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '18px 62px 48px 68px minmax(0, 1fr)',
+                  gridTemplateColumns: '18px 62px 48px 92px minmax(0, 1fr)',
                   columnGap: 8,
                   alignItems: 'start',
                   padding: '5px 0',
@@ -1337,21 +1337,7 @@ export function Panel(props: PanelProps) {
                 <span style={{ fontSize: FS.xs, lineHeight: '16px', color: trackColor(segment.track), whiteSpace: 'nowrap' }}>
                   {trackName(segment.track, t)}
                 </span>
-                <span style={{
-                  fontSize: FS.xs,
-                  lineHeight: '16px',
-                  padding: '0 4px',
-                  borderRadius: RADIUS_CHIP,
-                  border: `1px solid ${BORDER}`,
-                  background: spokeName ? ACCENT_SOFT : 'transparent',
-                  color: spokeName ? ACCENT : CAPTION,
-                  whiteSpace: 'nowrap',
-                  maxWidth: 76,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}>
-                  {spokeName || '—'}
-                </span>
+                <SpeakerChip name={spokeName} />
                 <span style={{ fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>{segment.text}</span>
               </div>
               )
@@ -1961,7 +1947,7 @@ export function Panel(props: PanelProps) {
                   key={`${segment.s}-${index}`}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '62px 48px 68px minmax(0, 1fr)',
+                    gridTemplateColumns: '62px 48px 92px minmax(0, 1fr)',
                     columnGap: 8,
                     alignItems: 'start',
                     padding: '5px 0',
@@ -1983,22 +1969,7 @@ export function Panel(props: PanelProps) {
                   }}>
                     {trackName(segment.track, t)}
                   </span>
-                  <span style={{
-                    justifySelf: 'start',
-                    fontSize: FS.xs,
-                    lineHeight: '16px',
-                    padding: '0 4px',
-                    borderRadius: RADIUS_CHIP,
-                    border: `1px solid ${BORDER}`,
-                    background: spokeName ? ACCENT_SOFT : 'transparent',
-                    color: spokeName ? ACCENT : CAPTION,
-                    whiteSpace: 'nowrap',
-                    maxWidth: 76,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}>
-                    {spokeName || '—'}
-                  </span>
+                  <SpeakerChip name={spokeName} />
                   <span style={{ minWidth: 0, fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>
                     {segment.text}
                   </span>
@@ -2521,6 +2492,40 @@ function RangeSelector(props: {
         onCommit={props.onCommit}
       />
     </>
+  )
+}
+
+
+/** 名字太长会撑破列宽，取括号前的部分再截断。 */
+function shortSpeaker(name: string): string {
+  const base = name.split(/[（(]/)[0].trim()
+  return base.length > 6 ? `${base.slice(0, 6)}…` : base
+}
+
+/** 转写行里的「说话人」标签，今日和说话人识别共用。 */
+function SpeakerChip({ name }: { name: string }): ReactElement {
+  return (
+    <span
+      title={name || '未分配'}
+      style={{
+        justifySelf: 'start',
+        display: 'inline-block',
+        maxWidth: '100%',
+        fontSize: FS.xs,
+        lineHeight: '16px',
+        padding: '0 4px',
+        borderRadius: RADIUS_CHIP,
+        border: `1px solid ${BORDER}`,
+        background: name ? ACCENT_SOFT : 'transparent',
+        color: name ? ACCENT : CAPTION,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        verticalAlign: 'middle',
+      }}
+    >
+      {name ? shortSpeaker(name) : '—'}
+    </span>
   )
 }
 

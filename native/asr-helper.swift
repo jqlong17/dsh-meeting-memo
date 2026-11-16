@@ -307,7 +307,9 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     func startMic() {
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
+        // 输入节点要用 inputFormat：outputFormat 是硬件处理后的渲染格式，
+        // 两者在 USB 麦克风上可能不一致（48k 双声道 vs 44.1k），拿错会把样本算坏。
+        let format = input.inputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             emit(["type": "error", "track": "mic", "message": "没有可用的麦克风输入"])
             return
