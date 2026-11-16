@@ -1,2 +1,2 @@
 /** Shown beside the panel refresh button. Keep in step with package.json. */
-export const PLUGIN_VERSION = '0.10.5'
+export const PLUGIN_VERSION = '0.1.0'
