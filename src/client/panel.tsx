@@ -568,21 +568,22 @@ export function Panel(props: PanelProps) {
     ))
   }, [data, activeSelection.start, activeSelection.end, track])
 
-  const visibleSegments = segments.slice(0, 700)
+  // 最新的在最上面：取最近 700 条再倒序
+  const visibleSegments = segments.slice(-700).reverse()
   const segmentChars = segments.reduce((sum, segment) => sum + segment.text.length, 0)
   const selectionMinutes = Math.max(0, Math.round(activeSelection.end - activeSelection.start))
 
   useEffect(() => {
     const list = listRef.current
     if (!list) return
-    const watchingLive = data?.day === data?.today && activeSelection.end >= clockNow() - 3
-    if (watchingLive) list.scrollTop = list.scrollHeight
-    else list.scrollTop = 0
+    // 倒序展示后，新内容出现在顶部，所以始终回到顶部
+    list.scrollTop = 0
   }, [activeSelection.start, activeSelection.end, track, segments.length, data?.day, data?.today])
 
-  const transcriptText = useMemo(() => visibleSegments
+  // 复制出去仍按时间正序，方便阅读和喂给模型
+  const transcriptText = useMemo(() => segments.slice(-700)
     .map((segment) => `[${clock(segment.s, true)}] ${trackName(segment.track, t)}：${segment.text}`)
-    .join('\n'), [visibleSegments, t])
+    .join('\n'), [segments, t])
 
   /** 本地资源：交给主进程在访达里打开（file:// 在 http 页面里会被拦截）。 */
   const revealPath = async (target: string) => {
@@ -707,7 +708,9 @@ export function Panel(props: PanelProps) {
   /** 选区内的转写行；勾选打标用。 */
   const speakerRows = () => {
     const range = speakerRange()
-    return (data?.segments ?? []).filter((segment) => segment.e > range.start && segment.s < range.end)
+    return (data?.segments ?? [])
+      .filter((segment) => segment.e > range.start && segment.s < range.end)
+      .reverse()
   }
 
   // 不依赖数组下标：拖选时算出来的 key 必须和渲染出来的对得上
@@ -1222,9 +1225,9 @@ export function Panel(props: PanelProps) {
     ))
     const capturedMinutes = bucketsInRange.length
     const speechMinutes = bucketsInRange.reduce((sum, bucket) => sum + Math.max(0, bucket.s), 0) / 60
-    const rows = (data?.segments ?? []).filter((segment) => (
-      segment.e > range.start && segment.s < range.end
-    ))
+    const rows = (data?.segments ?? [])
+      .filter((segment) => segment.e > range.start && segment.s < range.end)
+      .reverse()
     const groups = speaker?.groups ?? []
     return (
       <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
