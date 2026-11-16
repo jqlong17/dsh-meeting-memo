@@ -239,3 +239,50 @@ main { padding: 12px 16px 0; }
   color: var(--fg);
   word-break: break-word;
 }
+
+/* ── 时间轴选区 ─────────────────────────────────────────── */
+.timeline {
+  position: relative;
+  touch-action: none;      /* 拖拽时不要跟着页面滚动 */
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: crosshair;
+}
+
+.timeline .sel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: none;
+  background: var(--accent-soft);
+  border-left: 2px solid var(--accent);
+  border-right: 2px solid var(--accent);
+  pointer-events: none;
+}
+
+.tl-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 2px;
+}
+
+.tl-bar #selText {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--fg2);
+  font-variant-numeric: tabular-nums;
+}
+
+.tl-bar button {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--fg2);
+  font-size: 12px;
+  line-height: 1;
+  padding: 7px 10px;
+  border-radius: 999px;
+}

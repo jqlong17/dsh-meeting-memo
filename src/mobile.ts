@@ -139,7 +139,9 @@ function renderTimeline(buckets: Array<{ m: number; s: number }>, windowStart: n
     const label = `${String(Math.floor(minute / 60)).padStart(2, '0')}:00`
     ticks.push(`<text x="${x.toFixed(1)}" y="${height + 14}" font-size="20" fill="#8e8e93" text-anchor="middle">${label}</text>`)
   }
-  return `<div class="timeline"><svg viewBox="0 0 ${width} ${height + 20}" width="100%" height="110" preserveAspectRatio="none">${bars}${ticks.join('')}</svg></div>`
+  return `<div class="timeline" id="tl" data-start="${windowStart}" data-end="${windowEnd}">`
+    + `<svg viewBox="0 0 ${width} ${height + 20}" width="100%" height="110" preserveAspectRatio="none">${bars}${ticks.join('')}</svg>`
+    + '<div class="sel" id="sel"></div></div>'
 }
 
 /** 倒序转写：最新的在最前，带时间、说话人和正文。 */
@@ -155,7 +157,7 @@ function renderTranscript(
     const assigned = line ? assignments[String(line)] : undefined
     const speaker = assigned?.name ? assigned.name.split(/[（(]/)[0] : ''
     const track = segment.track === 'system' ? '系统' : segment.track === 'mic' ? '麦克风' : '合并'
-    return `<article class="row">
+    return `<article class="row" data-s="${segment.s}" data-e="${segment.e}">
   <div class="meta"><span class="time">${escapeHtml(formatClock(segment.s, true))}</span>`
       + `<span class="tag">${escapeHtml(track)}</span>`
       + (speaker ? `<span class="tag spk">${escapeHtml(speaker)}</span>` : '')
@@ -163,7 +165,7 @@ function renderTranscript(
   <p>${escapeHtml(segment.text)}</p>
 </article>`
   }).join('\n')
-  return html + (segments.length > limit ? `<p class="empty">只显示最近 ${limit} 条</p>` : '')
+  return html + (segments.length > limit ? `<p class="empty" id="more">只显示最近 ${limit} 条</p>` : '')
 }
 
 function renderPage(sections: { today: string; minutes: string }, token: string): string {
@@ -251,6 +253,11 @@ export function registerMobile(ctx: Context, service: MeetingService): () => voi
         sections = {
           today: `${renderStats(payload.stats)}`
             + renderTimeline(payload.buckets, payload.window.start, payload.window.end)
+            + '<div class="tl-bar">'
+            + '<span id="selText"></span>'
+            + '<button type="button" data-quick="last2h">最近 2 小时</button>'
+            + '<button type="button" data-quick="all">全天</button>'
+            + '</div>'
             + `<h2 class="group">转写</h2>${renderTranscript(payload.segments, assignments)}`,
           minutes: `<h2 class="group">最近纪要</h2>${renderItems(recent)}`,
         }

@@ -29,7 +29,7 @@
 </main>
 <script>
 window.__MT__ = {{TOKEN}};
-// 只切显示，不重新请求：数据都在 HTML 里。
+// 全部在前端完成：不请求服务端，数据都已经渲染在 HTML 里。
 (function () {
   var tabs = document.querySelectorAll('.tabs button');
   var panels = document.querySelectorAll('.panel');
@@ -47,6 +47,112 @@ window.__MT__ = {{TOKEN}};
   tabs.forEach(function (tab) {
     tab.addEventListener('click', function () { pick(tab.dataset.tab); });
   });
+
+  var tl = document.getElementById('tl');
+  if (!tl) return;
+  var sel = document.getElementById('sel');
+  var label = document.getElementById('selText');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.row'));
+  var more = document.getElementById('more');
+  var dayStart = parseFloat(tl.dataset.start);
+  var dayEnd = parseFloat(tl.dataset.end);
+  var range = null;
+  var dragging = false;
+  var anchorMinute = 0;
+  var moved = false;
+
+  function clock(minute) {
+    var m = Math.max(0, Math.min(1440, minute));
+    return ('0' + Math.floor(m / 60)).slice(-2) + ':' + ('0' + Math.round(m % 60)).slice(-2);
+  }
+
+  function minuteAt(clientX) {
+    var rect = tl.getBoundingClientRect();
+    var ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return dayStart + ratio * (dayEnd - dayStart);
+  }
+
+  function apply() {
+    if (!range) {
+      sel.style.display = 'none';
+      rows.forEach(function (row) { row.style.display = ''; });
+      var shown = rows.length;
+      label.textContent = '全天 · ' + shown + ' 条';
+      if (more) more.style.display = '';
+      return;
+    }
+    var start = Math.min(range.s, range.e);
+    var end = Math.max(range.s, range.e);
+    var span = Math.max(0.001, dayEnd - dayStart);
+    sel.style.display = 'block';
+    sel.style.left = ((start - dayStart) / span) * 100 + '%';
+    sel.style.width = ((end - start) / span) * 100 + '%';
+    var count = 0;
+    rows.forEach(function (row) {
+      var rs = parseFloat(row.dataset.s);
+      var re = parseFloat(row.dataset.e);
+      var hit = re > start && rs < end;
+      row.style.display = hit ? '' : 'none';
+      if (hit) count += 1;
+    });
+    label.textContent = clock(start) + '–' + clock(end) + ' · ' + Math.max(1, Math.round(end - start)) + ' 分钟 · ' + count + ' 条';
+    if (more) more.style.display = 'none';
+  }
+
+  function onDown(event) {
+    if (!event.isPrimary) return;
+    dragging = true;
+    moved = false;
+    anchorMinute = minuteAt(event.clientX);
+    range = { s: anchorMinute, e: anchorMinute };
+    tl.setPointerCapture(event.pointerId);
+    apply();
+  }
+
+  function onMove(event) {
+    if (!dragging || !event.isPrimary) return;
+    var minute = minuteAt(event.clientX);
+    if (Math.abs(minute - anchorMinute) >= 0.5) moved = true;
+    range = { s: anchorMinute, e: minute };
+    apply();
+    event.preventDefault();
+  }
+
+  function onUp(event) {
+    if (!dragging) return;
+    dragging = false;
+    try { tl.releasePointerCapture(event.pointerId); } catch (e) {}
+    if (!moved) {
+      // 只是点了一下：保留原选区，不误触
+      if (range && range.s === range.e) { range = null; apply(); }
+    } else if (range) {
+      var start = Math.round(Math.min(range.s, range.e));
+      var end = Math.round(Math.max(range.s, range.e));
+      range = end - start >= 1 ? { s: start, e: end } : null;
+      apply();
+    }
+  }
+
+  tl.addEventListener('pointerdown', onDown);
+  tl.addEventListener('pointermove', onMove);
+  tl.addEventListener('pointerup', onUp);
+  tl.addEventListener('pointercancel', onUp);
+
+  document.querySelectorAll('[data-quick]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var kind = button.dataset.quick;
+      if (kind === 'all') {
+        range = null;
+      } else {
+        var now = new Date();
+        var minute = now.getHours() * 60 + now.getMinutes();
+        range = { s: Math.max(dayStart, minute - 120), e: Math.min(dayEnd, minute) };
+      }
+      apply();
+    });
+  });
+
+  apply();
 })();
 </script>
 </body>
