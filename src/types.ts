@@ -243,6 +243,21 @@ export interface SkillsPayload {
   skills: SkillDTO[]
 }
 
+
+export interface MinutesGroupDTO {
+  day: string
+  sessions: MinuteSessionDTO[]
+  mdPath: string
+}
+
+export interface MinutesRangeDTO {
+  mode: 'week' | 'all' | 'day'
+  today: string
+  days: string[]
+  groups: MinutesGroupDTO[]
+  total: number
+}
+
 export interface MinutesOverview {
   day: string
   today: string

@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 
-import type { AsrModelsPayload, AsrStatusDTO, SpeakerPayload, BackgroundCardDTO, BackgroundsPayload, DayPayload, JobDTO, MemorySampleDTO, MinuteSessionDTO, MinutesOverview, MinutesPayload, ModelOfferDTO, SkillsPayload } from '../types.ts'
+import type { AsrModelsPayload, AsrStatusDTO, MinutesRangeDTO, SpeakerPayload, BackgroundCardDTO, BackgroundsPayload, DayPayload, JobDTO, MemorySampleDTO, MinuteSessionDTO, MinutesOverview, MinutesPayload, ModelOfferDTO, SkillsPayload } from '../types.ts'
 import type { RpcCall, RpcError } from './rpc.ts'
 import { buildIndexCopy } from '../copy-index.ts'
 import { PLUGIN_VERSION } from '../version.ts'
@@ -251,6 +251,8 @@ export function Panel(props: PanelProps) {
   const [models, setModels] = useState<AsrModelsPayload | null>(null)
   const [modelPath, setModelPath] = useState('')
   const [asr, setAsr] = useState<AsrStatusDTO | null>(null)
+  const [minutesMode, setMinutesMode] = useState<'week' | 'all' | 'day'>('week')
+  const [minutesRange, setMinutesRange] = useState<MinutesRangeDTO | null>(null)
   const [speaker, setSpeaker] = useState<SpeakerPayload | null>(null)
   const [spkStart, setSpkStart] = useState<number | null>(null)
   const [spkEnd, setSpkEnd] = useState<number | null>(null)
@@ -665,6 +667,16 @@ export function Panel(props: PanelProps) {
     if (!data?.day) return
     void loadAssign(data.day)
   }, [data?.day, loadAssign])
+
+  const loadRange = useCallback(async (mode: 'week' | 'all') => {
+    const result = await rpc<MinutesRangeDTO>('minutes.range', { mode })
+    if (result.ok) setMinutesRange(result.value)
+  }, [rpc])
+
+  useEffect(() => {
+    if (tab !== 'minutes' || minutesMode === 'day') return
+    void loadRange(minutesMode)
+  }, [tab, minutesMode, loadRange])
 
   const loadSpeaker = useCallback(async () => {
     const result = await rpc<SpeakerPayload>('speaker.list')
@@ -2009,6 +2021,52 @@ export function Panel(props: PanelProps) {
 
   const renderMinutes = () => {
     const sessions = minutes?.sessions ?? []
+    if (minutesMode !== 'day') {
+      const groups = minutesRange?.groups ?? []
+      return (
+        <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
+          {renderNotices()}
+          {groups.length === 0 ? (
+            <div style={{ ...smallStyle, lineHeight: 1.6, padding: '6px 0' }}>
+              {t(minutesMode === 'week' ? 'panel.minutes.emptyWeek' : 'panel.minutes.emptyAll')}
+            </div>
+          ) : groups.map((group) => (
+            <div key={group.day}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 6px' }}>
+                <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{group.day}</span>
+                <span style={smallStyle}>{t('panel.minutes.sessions').replace('{n}', String(group.sessions.length))}</span>
+                <button
+                  type="button"
+                  style={{ ...buttonStyle, marginLeft: 'auto' }}
+                  onClick={() => {
+                    setMinutesMode('day')
+                    void loadDay(group.day, true)
+                    void loadMinutes(group.day)
+                  }}
+                >
+                  {t('panel.minutes.openDay')}
+                </button>
+              </div>
+              {group.sessions.map((session) => (
+                <div key={`${group.day}-${session.id}`} style={{ ...cardStyle, marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2, fontVariantNumeric: 'tabular-nums' }}>
+                      {clock(session.start)}–{clock(session.end)}
+                    </span>
+                    <span style={{ fontSize: FS.sm, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {session.topic}
+                    </span>
+                  </div>
+                  <div style={{ ...smallStyle, marginTop: 4, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                    {summaryOf(sessionBody(session as unknown as Record<string, unknown>), 160)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )
+    }
     return (
       <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
         {renderNotices()}
@@ -2142,7 +2200,33 @@ export function Panel(props: PanelProps) {
             <span style={{ ...smallStyle, fontFamily: MONO }} title={t('panel.version')}>{PLUGIN_VERSION}</span>
           </div>
         </div>
-        {tab === 'today' || tab === 'minutes' ? (
+        {tab === 'minutes' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            <span style={{ ...smallStyle }}>{t('panel.minutes.range')}</span>
+            {(['week', 'all', 'day'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                style={{
+                  ...buttonStyle,
+                  ...(minutesMode === mode ? { borderColor: ACCENT, color: ACCENT, background: ACCENT_SOFT } : {}),
+                }}
+                onClick={() => {
+                  setMinutesMode(mode)
+                  if (mode === 'day' && data) void loadMinutes(data.day)
+                }}
+              >
+                {t(`panel.minutes.range.${mode}`)}
+              </button>
+            ))}
+            {minutesMode !== 'day' && minutesRange ? (
+              <span style={{ ...smallStyle, marginLeft: 'auto' }}>
+                {t('panel.minutes.range.count').replace('{n}', String(minutesRange.total))}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {tab === 'today' || (tab === 'minutes' && minutesMode === 'day') ? (
           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5, marginTop: 6 }}>
             <span style={{ marginRight: 'auto' }} />
             <button type="button" style={buttonStyle} disabled={currentIndex <= 0} onClick={() => goDay(-1)} title={t('panel.prevDay')}>‹</button>
@@ -2522,6 +2606,20 @@ function RangeSelector(props: {
 
 
 /** 名字太长会撑破列宽，取括号前的部分再截断。 */
+
+/** 列表里只给前若干字，点进单日看全文。 */
+function summaryOf(text: string, max = 160): string {
+  const plain = text
+    .split('\n')
+    .map((line) => line.replace(/^[>#*\-\s]+/, '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\*\*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return plain.length > max ? `${plain.slice(0, max)}…` : plain
+}
+
 function shortSpeaker(name: string): string {
   const base = name.split(/[（(]/)[0].trim()
   return base.length > 6 ? `${base.slice(0, 6)}…` : base

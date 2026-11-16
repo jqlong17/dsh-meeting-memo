@@ -57,6 +57,19 @@ export function minutesDir(home: string): string {
   return path.join(home, 'minutes')
 }
 
+
+/** 列出有纪要文件的日期（旧到新）。 */
+export function listMinutesDays(home: string): string[] {
+  try {
+    return readdirSync(minutesDir(home))
+      .map((name) => name.replace(/\.json$/, ''))
+      .filter((name) => DAY_RE.test(name))
+      .sort()
+  } catch {
+    return []
+  }
+}
+
 export function paths(home: string, day: string): { jsonPath: string; mdPath: string } {
   const safe = assertDay(day)
   const dir = minutesDir(home)

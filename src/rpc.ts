@@ -25,6 +25,8 @@ import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
 import { addLabel, deleteLabel, groupByDay, readLabels } from './speaker-labels.ts'
 import { audioPieces, diarizeTrack, nameSpeakers } from './speaker-diarize.ts'
+import { dayKey } from './asr-log.ts'
+import { listMinutesDays } from './minutes.ts'
 import { deleteSkill, readSkills, saveSkill, selectSkill } from './skills.ts'
 import { MeetingError } from './service.ts'
 import type { MeetingService } from './service.ts'
@@ -84,6 +86,31 @@ async function dispatch(
       return service.saveSelection(String(payload.day || ''), Number(payload.start), Number(payload.end))
     case 'minutes.list':
       return service.minutes(typeof payload.day === 'string' ? payload.day : undefined)
+    case 'minutes.range': {
+      const mode = payload.mode === 'all' ? 'all' : payload.mode === 'day' ? 'day' : 'week'
+      const today = dayKey(service.config.timeZone)
+      const all = listMinutesDays(service.config.home)
+      let selected: string[] = []
+      if (mode === 'all') {
+        selected = all
+      } else if (mode === 'day') {
+        const wanted = typeof payload.day === 'string' && payload.day ? payload.day : all.at(-1) ?? today
+        selected = [wanted]
+      } else {
+        const days: string[] = []
+        for (let offset = 6; offset >= 0; offset -= 1) {
+          const date = new Date(`${today}T00:00:00`)
+          date.setDate(date.getDate() - offset)
+          days.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`)
+        }
+        selected = all.filter((day) => days.includes(day))
+      }
+      const groups = selected.map((day) => {
+        const doc = service.minutesForDay(day)
+        return { day, sessions: doc.sessions, mdPath: doc.mdPath }
+      }).filter((group) => group.sessions.length > 0)
+      return { mode, today, days: all, groups, total: groups.reduce((sum, group) => sum + group.sessions.length, 0) }
+    }
     case 'minutes.generate':
     case 'minutes.draft': {
       const day = typeof payload.day === 'string' ? payload.day : undefined

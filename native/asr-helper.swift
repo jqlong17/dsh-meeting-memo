@@ -405,8 +405,13 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func startSystem() {
-        Task {
-            do {
+        // 起不来就退避重试：屏幕录制权限、显示器枚举都可能在启动瞬间失败，
+        // 之前只试一次，失败就整场会议都没有系统声音。
+        var attempts = 0
+        func attempt() {
+            attempts += 1
+            Task {
+                do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 guard let display = content.displays.first else {
                     emit(["type": "error", "track": "system", "message": "没有可用的显示器，系统声音未开启"])
@@ -425,10 +430,27 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
                 try await stream.startCapture()
                 self.stream = stream
                 emit(["type": "status", "phase": "running", "mic": self.engine != nil, "system": true, "input": self.inputName])
-            } catch {
-                emit(["type": "error", "track": "system", "message": "系统声音未开启：\(error.localizedDescription)。需要给 DeepSeek Harness 屏幕录制权限。麦克风转写仍会继续。"])
+                } catch {
+                    if attempts < 3 {
+                        let delay = Double(attempts) * 2
+                        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                        emit(["type": "status", "phase": "running", "mic": self.engine != nil, "system": false, "input": self.inputName])
+                        attempt()
+                        return
+                    }
+                    emit(["type": "error", "track": "system", "message": "系统声音未开启：\(error.localizedDescription)。需要给 DeepSeek Harness 屏幕录制权限。麦克风转写仍会继续。"])
+                }
             }
         }
+        attempt()
+    }
+
+    /// 采集流被系统停掉（睡眠、切换显示器、权限变化）时重建。
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        guard self.stream === stream else { return }
+        self.stream = nil
+        emit(["type": "status", "phase": "running", "mic": self.engine != nil, "system": false, "input": self.inputName])
+        startSystem()
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
