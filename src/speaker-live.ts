@@ -10,8 +10,15 @@ import path from 'node:path'
 
 import type { SpeakerLabel } from './speaker-labels.ts'
 
-/** 阈值来自实测：同人相似度均值 0.87，异人 0.20，0.65 能覆盖三个人又把陌生人挡住。 */
-export const MATCH_THRESHOLD = 0.65
+/**
+ * 判定「是他」需要两个条件同时成立：
+ *   1. 最高分够高（THRESHOLD）
+ *   2. 和第二名拉开差距（MARGIN）
+ * 只看绝对分数时，同一个人不同句子的分数会在 0.6 附近漂，容易漏；
+ * 而「像自己 0.66、像别人 0.09」这种悬殊差距才是更稳的信号。
+ */
+export const MATCH_THRESHOLD = 0.55
+export const MATCH_MARGIN = 0.15
 
 export type Vector = Float32Array
 
@@ -242,12 +249,24 @@ export interface Match {
   score: number
 }
 
-export function matchSpeaker(vector: Vector, set: CentroidSet, threshold = MATCH_THRESHOLD): Match | null {
+export function matchSpeaker(
+  vector: Vector,
+  set: CentroidSet,
+  threshold = MATCH_THRESHOLD,
+  margin = MATCH_MARGIN,
+): Match | null {
   let best: Match | null = null
+  let second = 0
   for (const [name, center] of set.centroids) {
     const score = cosine(vector, center)
-    if (!best || score > best.score) best = { name, score }
+    if (!best || score > best.score) {
+      if (best) second = best.score
+      best = { name, score }
+    } else if (score > second) {
+      second = score
+    }
   }
   if (!best || best.score < threshold) return null
+  if (best.score - second < margin) return null
   return best
 }

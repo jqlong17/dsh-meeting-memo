@@ -346,7 +346,13 @@ export function sliceRange(
   data: DayData,
   start: number,
   end: number,
-  options: { maxChars?: number; maxSegments?: number; withText?: boolean } = {},
+  options: {
+    maxChars?: number
+    maxSegments?: number
+    withText?: boolean
+    /** 每个片段是谁说的；拿不到就返回空。 */
+    speakerOf?: (segment: Segment) => string | undefined
+  } = {},
 ): RangeResult {
   const from = Math.max(0, Math.min(start, end))
   const to = Math.min(1440, Math.max(start, end))
@@ -362,7 +368,10 @@ export function sliceRange(
   let truncated = clipped.length < segments.length
   if (options.withText !== false) {
     for (const segment of clipped) {
-      const line = `[${formatClock(segment.s, true)}] ${trackLabel(segment.track)}：${segment.text}`
+      // 说话人认得出来就带上，纪要生成和导出都靠它区分谁说的
+      const who = options.speakerOf?.(segment)
+      const label = who ? `${trackLabel(segment.track)}/${who}` : trackLabel(segment.track)
+      const line = `[${formatClock(segment.s, true)}] ${label}：${segment.text}`
       if (line.length > budget) {
         truncated = true
         break

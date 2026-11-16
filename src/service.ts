@@ -12,6 +12,7 @@ import { DAY_RE, detectLifelogRoot, listDayDirs } from './config.ts'
 import type { MeetingConfig } from './config.ts'
 import { listSources, readSelectedRoot, writeSelectedRoot } from './source.ts'
 import { asrLogRoot } from './asr-log.ts'
+import { readAssignments } from './speaker-assignments.ts'
 import { dayStats, formatClock, hourlySummary, nowMinuteOfDay, parseClock, readDay, sliceRange, todayKey } from './lifelog.ts'
 import type { DayData } from './lifelog.ts'
 import {
@@ -623,7 +624,11 @@ export class MeetingService {
     const { day, data } = this.loadDay(dayRequest)
     const start = parseClock(startValue, this.config.windowStart)
     const end = parseClock(endValue, this.config.windowEnd)
-    const slice = sliceRange(data, start, end, { maxChars: options.maxChars, withText: true })
+    const slice = sliceRange(data, start, end, {
+      maxChars: options.maxChars,
+      withText: true,
+      speakerOf: (segment) => this.speakerOf(day, segment),
+    })
     return {
       day,
       start: slice.start,
@@ -674,6 +679,20 @@ export class MeetingService {
       truncated: payload.truncated,
       text: payload.text,
     }
+  }
+
+
+  /** 说话人分配按行号存在旁边，读一次缓存当天结果。 */
+  private speakerCache: { day: string; map: Record<string, { name?: string }> } | null = null
+
+  speakerOf(day: string, segment: { line?: number; lines?: number[] }): string | undefined {
+    if (!day) return undefined
+    if (!this.speakerCache || this.speakerCache.day !== day) {
+      this.speakerCache = { day, map: readAssignments(this.config.home)[day] ?? {} }
+    }
+    const line = segment.line ?? segment.lines?.[0]
+    if (!line) return undefined
+    return this.speakerCache.map[String(line)]?.name
   }
 
   readMinutes(dayRequest?: string): Record<string, unknown> {
