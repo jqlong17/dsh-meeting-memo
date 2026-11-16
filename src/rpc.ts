@@ -184,10 +184,26 @@ function dispatch(
       }
       const groups = groupByDay(items).map((group) => ({
         day: group.day,
-        items: group.items.map((item) => ({
-          ...item,
-          audioCount: root ? countAudio(root, item.day, item.start, item.end, service.config.timeZone) : 0,
-        })),
+        items: group.items.map((item) => {
+          let audioCount = root ? countAudio(root, item.day, item.start, item.end, service.config.timeZone) : 0
+          if (root && item.lines?.length) {
+            const wanted = new Set(item.lines)
+            const day = (() => {
+              try {
+                return service.dayPayload(item.day)
+              } catch {
+                return null
+              }
+            })()
+            if (day) {
+              const exact = day.segments.filter((segment) => (
+                (segment.lines ?? (segment.line ? [segment.line] : [])).some((line) => wanted.has(line))
+              )).filter((segment) => Boolean(segment.audio)).length
+              audioCount = exact
+            }
+          }
+          return { ...item, audioCount }
+        }),
       }))
       return { groups, total: items.length, audioOn: Boolean(asr?.runtime.status().mode === 'raw') }
     }

@@ -257,6 +257,7 @@ export function Panel(props: PanelProps) {
   const [spkLabel, setSpkLabel] = useState('')
   const [spkNote, setSpkNote] = useState('')
   const [spkView, setSpkView] = useState<'tag' | 'saved'>('tag')
+  const [spkPicked, setSpkPicked] = useState<string[]>([])
   const [, setTick] = useState(0)
   const [editing, setEditing] = useState<EditState | null>(null)
   const [confirmId, setConfirmId] = useState('')
@@ -660,24 +661,63 @@ export function Panel(props: PanelProps) {
     void loadSpeaker()
   }, [tab, loadSpeaker])
 
+  /** 选区范围；没点「开始」时用最近 10 分钟做默认。 */
+  const speakerRange = () => {
+    const now = clockNow()
+    return {
+      start: spkStart ?? Math.max(data?.window.start ?? 0, now - 10),
+      end: spkEnd ?? now,
+    }
+  }
+
+  /** 选区内的转写行；勾选打标用。 */
+  const speakerRows = () => {
+    const range = speakerRange()
+    return (data?.segments ?? []).filter((segment) => segment.e > range.start && segment.s < range.end)
+  }
+
+  const rowKey = (segment: { line?: number; lines?: number[] }, index: number): string =>
+    String(segment.line ?? segment.lines?.[0] ?? `i${index}`)
+
+  const togglePick = (key: string) => {
+    setSpkPicked((previous) => (previous.includes(key)
+      ? previous.filter((item) => item !== key)
+      : [...previous, key]))
+  }
+
   const saveSpeaker = async () => {
     if (!data) return
-    if (spkStart === null || spkEnd === null) {
-      setNoticeError(t('panel.speaker.needRange'))
-      return
-    }
     const label = spkLabel.trim()
     if (!label) {
       setNoticeError(t('panel.speaker.needLabel'))
       return
     }
+    const rows = speakerRows()
+    const picked = spkPicked.length
+      ? rows.filter((segment, index) => spkPicked.includes(rowKey(segment, index)))
+      : []
+    let start: number
+    let end: number
+    let lines: number[] = []
+    if (picked.length) {
+      start = Math.min(...picked.map((segment) => segment.s))
+      end = Math.max(...picked.map((segment) => segment.e))
+      lines = [...new Set(picked.flatMap((segment) => segment.lines ?? (segment.line ? [segment.line] : [])))].sort((a, b) => a - b)
+    } else if (spkStart !== null && spkEnd !== null) {
+      start = Math.min(spkStart, spkEnd)
+      end = Math.max(spkStart, spkEnd)
+    } else {
+      setNoticeError(t('panel.speaker.needRange'))
+      return
+    }
     const result = await rpc('speaker.add', {
       item: {
         day: data.day,
-        start: Math.min(spkStart, spkEnd),
-        end: Math.max(spkStart, spkEnd),
+        start,
+        end,
         label,
         note: spkNote.trim(),
+        ...(lines.length ? { lines } : {}),
       },
     })
     if (!result.ok) {
@@ -687,6 +727,7 @@ export function Panel(props: PanelProps) {
     setNoticeError('')
     setSpkStart(null)
     setSpkEnd(null)
+    setSpkPicked([])
     setSpkLabel('')
     setSpkNote('')
     setNotice(t('panel.speaker.saved'))
@@ -1190,24 +1231,45 @@ export function Panel(props: PanelProps) {
                   {t('panel.speaker.save')}
                 </button>
               </div>
+              {spkPicked.length ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                  <span style={{ ...smallStyle, color: ACCENT }}>
+                    {t('panel.speaker.picked').replace('{n}', String(spkPicked.length))}
+                  </span>
+                  <button type="button" style={buttonStyle} onClick={() => setSpkPicked([])}>
+                    {t('panel.speaker.clearPick')}
+                  </button>
+                </div>
+              ) : null}
               {renderNotices()}
               <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.5 }}>{t('panel.speaker.hint')}</div>
             </div>
 
             {rows.length === 0 ? (
               <div style={{ ...smallStyle, lineHeight: 1.6, padding: '10px 0' }}>{t('panel.speaker.emptyRange')}</div>
-            ) : rows.map((segment, index) => (
+            ) : rows.map((segment, index) => {
+              const key = rowKey(segment, index)
+              const picked = spkPicked.includes(key)
+              return (
               <div
-                key={`${segment.s}-${index}`}
+                key={key}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '62px 48px minmax(0, 1fr)',
+                  gridTemplateColumns: '18px 62px 48px minmax(0, 1fr)',
                   columnGap: 8,
                   alignItems: 'start',
                   padding: '5px 0',
                   borderBottom: `1px solid ${BORDER}`,
+                  background: picked ? 'var(--pl-brand-soft)' : 'transparent',
                 }}
               >
+                <input
+                  type="checkbox"
+                  checked={picked}
+                  onChange={() => togglePick(key)}
+                  style={{ marginTop: 3 }}
+                  aria-label={t('panel.speaker.pick')}
+                />
                 <span style={{ fontFamily: MONO, fontSize: FS.xs, lineHeight: '18px', color: CAPTION, fontVariantNumeric: 'tabular-nums' }}>
                   {clock(segment.s, true)}
                 </span>
@@ -1216,7 +1278,8 @@ export function Panel(props: PanelProps) {
                 </span>
                 <span style={{ fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>{segment.text}</span>
               </div>
-            ))}
+              )
+            })}
           </div>
         ) : (
           <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '8px 10px 16px' }}>

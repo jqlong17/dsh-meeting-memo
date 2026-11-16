@@ -17,6 +17,8 @@ export interface SpeakerLabel {
   end: number
   label: string
   note?: string
+  /** 勾选的具体转写行（snippets.jsonl 行号）；按行打标时才有。 */
+  lines?: number[]
   createdAt: string
 }
 
@@ -43,6 +45,9 @@ function normalize(raw: unknown): SpeakerLabel | null {
   const s = Math.max(0, Math.min(1439, start))
   const e = Math.max(s + 1 / 60, Math.min(1440, end))
   const note = String(record.note ?? '').trim()
+  const lines = Array.isArray(record.lines)
+    ? [...new Set(record.lines.map((item) => Number(item)).filter((item) => Number.isFinite(item) && item > 0))].sort((a, b) => a - b)
+    : []
   return {
     id: String(record.id ?? '').trim() || `spk-${randomUUID()}`,
     day,
@@ -50,6 +55,7 @@ function normalize(raw: unknown): SpeakerLabel | null {
     end: Math.round(e * 100) / 100,
     label: label.slice(0, 40),
     ...(note ? { note: note.slice(0, 200) } : {}),
+    ...(lines.length ? { lines } : {}),
     createdAt: typeof record.createdAt === 'string' && record.createdAt ? record.createdAt : new Date().toISOString(),
   }
 }

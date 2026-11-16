@@ -73,3 +73,24 @@ test('deletes one label', () => {
     rmSync(home, { recursive: true, force: true })
   }
 })
+
+test('keeps picked line numbers and dedupes them', () => {
+  const home = tempHome()
+  try {
+    addLabel(home, { day: '2026-11-16', start: 600, end: 604, label: '佳奇', lines: [12, 13, 13, 20] })
+    const items = readLabels(home)
+    assert.deepEqual(items[0].lines, [12, 13, 20])
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('a label without picks has no lines field', () => {
+  const home = tempHome()
+  try {
+    addLabel(home, { day: '2026-11-16', start: 600, end: 604, label: 'A' })
+    assert.equal(readLabels(home)[0].lines, undefined)
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})

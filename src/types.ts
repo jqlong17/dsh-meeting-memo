@@ -224,6 +224,8 @@ export interface SpeakerLabelDTO {
   end: number
   label: string
   note?: string
+  /** 勾选的具体转写行；按行打标时才有。 */
+  lines?: number[]
   createdAt: string
   /** 这段时间里落了多少个 wav。 */
   audioCount?: number
