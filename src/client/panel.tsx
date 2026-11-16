@@ -710,8 +710,17 @@ export function Panel(props: PanelProps) {
     return (data?.segments ?? []).filter((segment) => segment.e > range.start && segment.s < range.end)
   }
 
-  const rowKey = (segment: { line?: number; lines?: number[] }, index: number): string =>
-    String(segment.line ?? segment.lines?.[0] ?? `i${index}`)
+  // 不依赖数组下标：拖选时算出来的 key 必须和渲染出来的对得上
+  const rowKey = (segment: { line?: number; lines?: number[]; s: number; e: number }): string =>
+    String(segment.line ?? segment.lines?.[0] ?? `${segment.s}-${segment.e}`)
+
+  /** 选区内的句子默认全选，边删边留即可。 */
+  const pickRowsInRange = (start: number, end: number) => {
+    const from = Math.min(start, end)
+    const to = Math.max(start, end)
+    const rows = (data?.segments ?? []).filter((segment) => segment.e > from && segment.s < to)
+    setSpkPicked(rows.map((segment) => rowKey(segment)))
+  }
 
   const togglePick = (key: string) => {
     setSpkPicked((previous) => (previous.includes(key)
@@ -728,7 +737,7 @@ export function Panel(props: PanelProps) {
     }
     const rows = speakerRows()
     const picked = spkPicked.length
-      ? rows.filter((segment, index) => spkPicked.includes(rowKey(segment, index)))
+      ? rows.filter((segment) => spkPicked.includes(rowKey(segment)))
       : []
     let start: number
     let end: number
@@ -1226,7 +1235,12 @@ export function Panel(props: PanelProps) {
             captureMinutes={capturedMinutes}
             speechMinutes={speechMinutes}
             onDraft={(next) => { setSpkStart(next.start); setSpkEnd(next.end) }}
-            onCommit={(next) => { setSpkStart(next.start); setSpkEnd(next.end) }}
+            onCommit={(next) => {
+              setSpkStart(next.start)
+              setSpkEnd(next.end)
+              // 拖完选区，范围内的句子默认全选——打标通常就是「这段都是这个人」
+              pickRowsInRange(next.start, next.end)
+            }}
             onLast2h={() => {
               setSpkStart(Math.max(data?.window.start ?? 0, clockNow() - 120))
               setSpkEnd(clockNow())
@@ -1256,7 +1270,11 @@ export function Panel(props: PanelProps) {
               type="button"
               style={buttonStyle}
               disabled={!onToday || spkStart === null}
-              onClick={() => setSpkEnd(clockNow())}
+              onClick={() => {
+                const end = clockNow()
+                setSpkEnd(end)
+                if (spkStart !== null) pickRowsInRange(spkStart, end)
+              }}
             >{t('panel.speaker.markEnd')}</button>
             <button
               type="button"
@@ -1315,7 +1333,7 @@ export function Panel(props: PanelProps) {
             {rows.length === 0 ? (
               <div style={{ ...smallStyle, lineHeight: 1.6, padding: '10px 0' }}>{t('panel.speaker.emptyRange')}</div>
             ) : rows.map((segment, index) => {
-              const key = rowKey(segment, index)
+              const key = rowKey(segment)
               const picked = spkPicked.includes(key)
               const assigned = segment.line ? assign[String(segment.line)] : undefined
               const spokeName = assigned?.name ?? (assigned ? assigned.speaker.replace('speaker_', 'S') : '')
