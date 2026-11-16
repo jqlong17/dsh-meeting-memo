@@ -2085,17 +2085,6 @@ export function Panel(props: PanelProps) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 6px' }}>
                 <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{group.day}</span>
                 <span style={smallStyle}>{t('panel.minutes.sessions').replace('{n}', String(group.sessions.length))}</span>
-                <button
-                  type="button"
-                  style={{ ...buttonStyle, marginLeft: 'auto' }}
-                  onClick={() => {
-                    setMinutesMode('day')
-                    void loadDay(group.day, true)
-                    void loadMinutes(group.day)
-                  }}
-                >
-                  {t('panel.minutes.openDay')}
-                </button>
               </div>
               {group.sessions.map((session) => {
                 const key = `${group.day}-${session.id}`
@@ -2135,17 +2124,6 @@ export function Panel(props: PanelProps) {
                             onClick={() => void copySession(session, group.day, `range-${key}`)}
                           >
                             {flash === `range-${key}` ? t('panel.minutes.copied') : t('panel.minutes.copy')}
-                          </button>
-                          <button
-                            type="button"
-                            style={buttonStyle}
-                            onClick={() => {
-                              setMinutesMode('day')
-                              void loadDay(group.day, true)
-                              void loadMinutes(group.day)
-                            }}
-                          >
-                            {t('panel.minutes.openDay')}
                           </button>
                         </div>
                       </>
