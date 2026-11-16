@@ -253,6 +253,7 @@ export function Panel(props: PanelProps) {
   const [asr, setAsr] = useState<AsrStatusDTO | null>(null)
   const [minutesMode, setMinutesMode] = useState<'week' | 'all' | 'day'>('week')
   const [minutesRange, setMinutesRange] = useState<MinutesRangeDTO | null>(null)
+  const [expandedMinute, setExpandedMinute] = useState<string | null>(null)
   const [speaker, setSpeaker] = useState<SpeakerPayload | null>(null)
   const [spkStart, setSpkStart] = useState<number | null>(null)
   const [spkEnd, setSpkEnd] = useState<number | null>(null)
@@ -2047,21 +2048,69 @@ export function Panel(props: PanelProps) {
                   {t('panel.minutes.openDay')}
                 </button>
               </div>
-              {group.sessions.map((session) => (
-                <div key={`${group.day}-${session.id}`} style={{ ...cardStyle, marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2, fontVariantNumeric: 'tabular-nums' }}>
-                      {clock(session.start)}–{clock(session.end)}
-                    </span>
-                    <span style={{ fontSize: FS.sm, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {session.topic}
-                    </span>
+              {group.sessions.map((session) => {
+                const key = `${group.day}-${session.id}`
+                const open = expandedMinute === key
+                const body = sessionBody(session as unknown as Record<string, unknown>)
+                return (
+                  <div key={key} style={{ ...cardStyle, marginBottom: 8 }}>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setExpandedMinute(open ? null : key)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          setExpandedMinute(open ? null : key)
+                        }
+                      }}
+                      style={{ display: 'flex', alignItems: 'baseline', gap: 8, cursor: 'pointer' }}
+                    >
+                      <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2, fontVariantNumeric: 'tabular-nums', flex: '0 0 auto' }}>
+                        {clock(session.start)}–{clock(session.end)}
+                      </span>
+                      <span style={{ fontSize: FS.sm, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {session.topic}
+                      </span>
+                      <span style={{ ...smallStyle, marginLeft: 'auto', flex: '0 0 auto', color: FG2 }}>
+                        {open ? '▾' : '▸'}
+                      </span>
+                    </div>
+                    {open ? (
+                      <>
+                        {body ? renderMarkdownLite(body, (target) => void revealPath(target)) : null}
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 6 }}>
+                          <button
+                            type="button"
+                            style={buttonStyle}
+                            onClick={() => {
+                              const text = `## ${clock(session.start)}–${clock(session.end)} · ${session.topic}\n\n${body}\n`
+                              void copyText(text, `range-${key}`)
+                            }}
+                          >
+                            {flash === `range-${key}` ? t('panel.minutes.copied') : t('panel.minutes.copy')}
+                          </button>
+                          <button
+                            type="button"
+                            style={buttonStyle}
+                            onClick={() => {
+                              setMinutesMode('day')
+                              void loadDay(group.day, true)
+                              void loadMinutes(group.day)
+                            }}
+                          >
+                            {t('panel.minutes.openDay')}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ ...smallStyle, marginTop: 4, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                        {summaryOf(body, 160)}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ ...smallStyle, marginTop: 4, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                    {summaryOf(sessionBody(session as unknown as Record<string, unknown>), 160)}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           ))}
         </div>
