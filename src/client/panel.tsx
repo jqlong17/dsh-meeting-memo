@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 
-import type { AsrModelsPayload, AsrStatusDTO, BackgroundCardDTO, BackgroundsPayload, DayPayload, JobDTO, MemorySampleDTO, MinuteSessionDTO, MinutesOverview, MinutesPayload, ModelOfferDTO, SkillsPayload } from '../types.ts'
+import type { AsrModelsPayload, AsrStatusDTO, SpeakerPayload, BackgroundCardDTO, BackgroundsPayload, DayPayload, JobDTO, MemorySampleDTO, MinuteSessionDTO, MinutesOverview, MinutesPayload, ModelOfferDTO, SkillsPayload } from '../types.ts'
 import type { RpcCall, RpcError } from './rpc.ts'
 import { buildIndexCopy } from '../copy-index.ts'
 import { PLUGIN_VERSION } from '../version.ts'
@@ -225,7 +225,7 @@ function sourceLabel(source: MinuteSessionDTO['source'], t: (key: string) => str
 
 export function Panel(props: PanelProps) {
   const { rpc, t } = props
-  const [tab, setTab] = useState<'today' | 'minutes' | 'background' | 'jobs' | 'asr' | 'about'>('today')
+  const [tab, setTab] = useState<'today' | 'minutes' | 'background' | 'jobs' | 'asr' | 'speaker' | 'about'>('today')
   const [data, setData] = useState<DayPayload | null>(null)
   const [dataError, setDataError] = useState<RpcError | null>(null)
   const [loading, setLoading] = useState(false)
@@ -251,6 +251,11 @@ export function Panel(props: PanelProps) {
   const [models, setModels] = useState<AsrModelsPayload | null>(null)
   const [modelPath, setModelPath] = useState('')
   const [asr, setAsr] = useState<AsrStatusDTO | null>(null)
+  const [speaker, setSpeaker] = useState<SpeakerPayload | null>(null)
+  const [spkStart, setSpkStart] = useState<number | null>(null)
+  const [spkEnd, setSpkEnd] = useState<number | null>(null)
+  const [spkLabel, setSpkLabel] = useState('')
+  const [spkNote, setSpkNote] = useState('')
   const [, setTick] = useState(0)
   const [editing, setEditing] = useState<EditState | null>(null)
   const [confirmId, setConfirmId] = useState('')
@@ -644,6 +649,55 @@ export function Panel(props: PanelProps) {
 
   useEffect(() => { void loadSkills() }, [loadSkills])
 
+  const loadSpeaker = useCallback(async () => {
+    const result = await rpc<SpeakerPayload>('speaker.list')
+    if (result.ok) setSpeaker(result.value)
+  }, [rpc])
+
+  useEffect(() => {
+    if (tab !== 'speaker') return
+    void loadSpeaker()
+  }, [tab, loadSpeaker])
+
+  const saveSpeaker = async () => {
+    if (!data) return
+    if (spkStart === null || spkEnd === null) {
+      setNoticeError(t('panel.speaker.needRange'))
+      return
+    }
+    const label = spkLabel.trim()
+    if (!label) {
+      setNoticeError(t('panel.speaker.needLabel'))
+      return
+    }
+    const result = await rpc('speaker.add', {
+      item: {
+        day: data.day,
+        start: Math.min(spkStart, spkEnd),
+        end: Math.max(spkStart, spkEnd),
+        label,
+        note: spkNote.trim(),
+      },
+    })
+    if (!result.ok) {
+      setNoticeError(result.error.message)
+      return
+    }
+    setNoticeError('')
+    setSpkStart(null)
+    setSpkEnd(null)
+    setSpkLabel('')
+    setSpkNote('')
+    setNotice(t('panel.speaker.saved'))
+    void loadSpeaker()
+  }
+
+  const deleteSpeaker = async (id: string) => {
+    const result = await rpc('speaker.delete', { id })
+    if (!result.ok) setNoticeError(result.error.message)
+    else void loadSpeaker()
+  }
+
   const generateDraft = async () => {
     if (!data) return
     if (!skills?.selectedId) {
@@ -1031,6 +1085,142 @@ export function Panel(props: PanelProps) {
             </div>
           )
         })}
+      </div>
+    )
+  }
+
+  const renderSpeaker = () => {
+    const onToday = Boolean(data && data.day === data.today)
+    const now = clockNow()
+    const hasRange = spkStart !== null && spkEnd !== null
+    const rangeStart = spkStart ?? Math.max(data?.window.start ?? 0, now - 10)
+    const rangeEnd = spkEnd ?? now
+    const groups = speaker?.groups ?? []
+    return (
+      <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
+        <div style={{ ...smallStyle, lineHeight: 1.55, marginBottom: 6 }}>{t('panel.speaker.hint')}</div>
+        {renderNotices()}
+
+        <div style={{ ...cardStyle }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            marginBottom: 6,
+            fontSize: FS.xs,
+            lineHeight: 1.5,
+            color: speaker?.audioOn ? FG2 : WARN,
+          }}>
+            <span style={{
+              width: 6,
+              height: 6,
+              borderRadius: RADIUS_PILL,
+              background: speaker?.audioOn ? SUCCESS : WARN,
+              flex: '0 0 auto',
+            }} />
+            <span>{speaker?.audioOn ? t('panel.speaker.audioOn') : t('panel.speaker.audioOff')}</span>
+          </div>
+
+          {data ? (
+            <TimelineChart
+              buckets={data.buckets}
+              start={data.window.start}
+              end={data.window.end}
+              height={150}
+              selection={{ start: rangeStart, end: rangeEnd }}
+              now={onToday ? now : null}
+              labels={{
+                density: t('panel.spk.lane'),
+                hint: t('panel.spk.laneHint'),
+                gap: t('panel.legend.gap'),
+                speech: t('panel.legend.speech'),
+                now: t('panel.now'),
+              }}
+              formatTime={(minute) => clock(minute)}
+              onCommit={(range) => { setSpkStart(range.start); setSpkEnd(range.end); setSpkLabel(spkLabel) }}
+            />
+          ) : null}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              style={spkStart === null ? primaryButtonStyle : buttonStyle}
+              disabled={!onToday}
+              onClick={() => { setSpkStart(now); setSpkEnd(null) }}
+            >
+              {t('panel.speaker.markStart')}
+            </button>
+            <button
+              type="button"
+              style={spkStart !== null && spkEnd === null ? primaryButtonStyle : buttonStyle}
+              disabled={!onToday || spkStart === null}
+              onClick={() => setSpkEnd(clockNow())}
+            >
+              {t('panel.speaker.markEnd')}
+            </button>
+            {spkStart !== null ? (
+              <button type="button" style={buttonStyle} onClick={() => { setSpkStart(null); setSpkEnd(null) }}>
+                {t('panel.speaker.reset')}
+              </button>
+            ) : null}
+            <span style={{ flex: '1 1 auto' }} />
+            <span style={{ ...smallStyle, fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
+              {spkStart === null ? t('panel.speaker.waiting') : `${clock(spkStart, true)} – ${spkEnd === null ? t('panel.now') : clock(spkEnd, true)}`}
+            </span>
+          </div>
+
+          {hasRange ? (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <input
+                style={{ ...inputStyle }}
+                value={spkLabel}
+                placeholder={t('panel.speaker.labelHint')}
+                onChange={(event) => setSpkLabel(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') void saveSpeaker() }}
+              />
+              <input
+                style={{ ...inputStyle }}
+                value={spkNote}
+                placeholder={t('panel.speaker.note')}
+                onChange={(event) => setSpkNote(event.target.value)}
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="button" style={primaryButtonStyle} onClick={() => void saveSpeaker()}>
+                  {t('panel.speaker.save')}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div style={{ ...smallStyle, margin: '10px 0 6px', display: 'flex', gap: 8 }}>
+          <span>{t('panel.speaker.count').replace('{n}', String(speaker?.total ?? 0))}</span>
+        </div>
+        {groups.length === 0 ? (
+          <div style={{ ...smallStyle, lineHeight: 1.6 }}>{t('panel.speaker.empty')}</div>
+        ) : groups.map((group) => (
+          <div key={group.day}>
+            <div style={{ ...smallStyle, fontWeight: 600, margin: '10px 0 4px' }}>{group.day}</div>
+            {group.items.map((item) => (
+              <div key={item.id} style={{ ...cardStyle, padding: '8px 10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2, fontVariantNumeric: 'tabular-nums' }}>
+                    {clock(item.start, true)}–{clock(item.end, true)}
+                  </span>
+                  <span style={{ fontSize: FS.sm, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {item.label}
+                  </span>
+                  <span style={{ flex: '1 1 auto' }} />
+                  <span style={{ ...smallStyle }}>{t('panel.speaker.audioCount').replace('{n}', String(item.audioCount ?? 0))}</span>
+                  <button type="button" style={{ ...buttonStyle, color: DANGER }} onClick={() => void deleteSpeaker(item.id)}>
+                    {t('panel.speaker.delete')}
+                  </button>
+                </div>
+                {item.note ? <div style={{ ...smallStyle, marginTop: 3 }}>{item.note}</div> : null}
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
     )
   }
@@ -1750,7 +1940,7 @@ export function Panel(props: PanelProps) {
       <div style={{ flex: '0 0 auto', padding: 'var(--pl-pad) var(--pl-pad) 10px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, borderBottom: `1px solid ${BORDER}` }}>
           <div style={{ display: 'flex', gap: 12, overflowX: 'auto', minWidth: 0 }}>
-            {(['today', 'minutes', 'background', 'jobs', 'asr', 'about'] as const).map((key) => (
+            {(['today', 'minutes', 'background', 'jobs', 'asr', 'speaker', 'about'] as const).map((key) => (
               <button
                 key={key}
                 type="button"
@@ -1807,7 +1997,7 @@ export function Panel(props: PanelProps) {
         ) : null}
       </div>
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {tab === 'today' ? renderToday() : tab === 'minutes' ? renderMinutes() : tab === 'background' ? renderBackground() : tab === 'jobs' ? renderJobs() : tab === 'asr' ? renderAsr() : renderAbout()}
+        {tab === 'today' ? renderToday() : tab === 'minutes' ? renderMinutes() : tab === 'background' ? renderBackground() : tab === 'jobs' ? renderJobs() : tab === 'asr' ? renderAsr() : tab === 'speaker' ? renderSpeaker() : renderAbout()}
       </div>
     </div>
   )

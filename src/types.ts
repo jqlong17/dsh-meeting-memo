@@ -12,6 +12,8 @@ export interface SegmentDTO {
   line?: number
   /** 合并后的片段可能跨多行；复制索引需要全部行号。 */
   lines?: number[]
+  /** 原始 wav 路径（保存原音时才有）。 */
+  audio?: string
 }
 
 export interface BucketDTO {
@@ -212,6 +214,26 @@ export interface SkillDTO {
   prompt: string
   builtin?: boolean
   updatedAt: string
+}
+
+
+export interface SpeakerLabelDTO {
+  id: string
+  day: string
+  start: number
+  end: number
+  label: string
+  note?: string
+  createdAt: string
+  /** 这段时间里落了多少个 wav。 */
+  audioCount?: number
+}
+
+export interface SpeakerPayload {
+  groups: Array<{ day: string; items: SpeakerLabelDTO[] }>
+  total: number
+  /** 是否在保存原音；关掉时打标没有音频可用。 */
+  audioOn: boolean
 }
 
 export interface SkillsPayload {

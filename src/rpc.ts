@@ -11,7 +11,9 @@
  *   minutes.clear  -> remove the whole day's minutes file
  *   backgrounds.*  -> list/upsert/delete background cards and their selection
  */
+import { readdirSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import path from 'node:path'
 
 import type { Context } from '@deepseek-ai/cordis'
 
@@ -20,6 +22,7 @@ import { ModelDownloads } from './model-download.ts'
 import { defaultDownloadRoot, offerMatches, offersForPlatform } from './model-catalog.ts'
 import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
+import { addLabel, deleteLabel, groupByDay, readLabels } from './speaker-labels.ts'
 import { deleteSkill, readSkills, saveSkill, selectSkill } from './skills.ts'
 import { MeetingError } from './service.ts'
 import type { MeetingService } from './service.ts'
@@ -171,6 +174,29 @@ function dispatch(
       if (typeof payload.enabled === 'boolean') return runtime.setEnabled(payload.enabled)
       throw new MeetingError('BAD_ASR', '缺少 enabled 或 mode')
     }
+    case 'speaker.list': {
+      const items = readLabels(service.config.home)
+      let root = ''
+      try {
+        root = service.dayPayload(undefined).root
+      } catch {
+        root = ''
+      }
+      const groups = groupByDay(items).map((group) => ({
+        day: group.day,
+        items: group.items.map((item) => ({
+          ...item,
+          audioCount: root ? countAudio(root, item.day, item.start, item.end, service.config.timeZone) : 0,
+        })),
+      }))
+      return { groups, total: items.length, audioOn: Boolean(asr?.runtime.status().mode === 'raw') }
+    }
+    case 'speaker.add': {
+      const result = addLabel(service.config.home, payload.item)
+      return { item: result.item, total: result.items.length }
+    }
+    case 'speaker.delete':
+      return { total: deleteLabel(service.config.home, String(payload.id || '')).length }
     default:
       throw new MeetingError('UNKNOWN_OP', `未知操作：${op || '(空)'}`)
   }
@@ -211,6 +237,33 @@ function routeBridge(): RouteBridge {
   const holder = globalThis as unknown as Record<symbol, RouteBridge | undefined>
   if (!holder[BRIDGE_KEY]) holder[BRIDGE_KEY] = {}
   return holder[BRIDGE_KEY] as RouteBridge
+}
+
+
+/** 数某天某段区间落了多少个 wav（文件名就是毫秒时间戳）。 */
+function countAudio(root: string, day: string, start: number, end: number, timeZone: string): number {
+  const base = Date.parse(`${day}T00:00:00`)
+  if (!Number.isFinite(base)) return 0
+  // 用当地零点拼出毫秒区间；日期字符串按本地解释，和日志口径一致。
+  const from = base + start * 60_000
+  const to = base + end * 60_000
+  let total = 0
+  for (const track of ['mic', 'system']) {
+    const dir = path.join(root, day, 'audio', track)
+    let names: string[] = []
+    try {
+      names = readdirSync(dir)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (!name.endsWith('.wav')) continue
+      const ms = Number(name.slice(0, -4))
+      if (Number.isFinite(ms) && ms >= from && ms <= to) total += 1
+    }
+  }
+  void timeZone
+  return total
 }
 
 export function registerMeetingRoutes(

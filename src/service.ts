@@ -100,6 +100,7 @@ function toSegmentDTO(segment: { s: number; e: number; track: string; text: stri
     ...(segment.source ? { source: segment.source } : {}),
     ...(typeof segment.line === 'number' ? { line: segment.line } : {}),
     ...(segment.lines?.length ? { lines: segment.lines } : {}),
+    ...(segment.audio ? { audio: segment.audio } : {}),
   }
 }
 
