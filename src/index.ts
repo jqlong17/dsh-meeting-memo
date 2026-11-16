@@ -14,6 +14,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import { AsrModelRegistry } from './asr-models.ts'
 import { ModelDownloads } from './model-download.ts'
+import { registerMobile } from './mobile.ts'
 import { AsrRuntime } from './asr-service.ts'
 import { resolveConfig } from './config.ts'
 import { MinutesJobStore } from './jobs.ts'
@@ -104,6 +105,7 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
 
   ctx.inject(['connection', 'webServer'], (scope: Context) => {
     scope.effect(() => registerMeetingRoutes(scope, service, jobs, { models: asrModels, runtime: asr, downloads }), 'meeting-minutes: panel rpc')
+    scope.effect(() => registerMobile(scope, service), 'meeting-minutes: mobile page')
   })
 
   ctx.inject(['tools'], (scope: Context) => {

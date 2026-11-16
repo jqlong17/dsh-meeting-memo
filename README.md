@@ -34,6 +34,19 @@ dsh plugin --profile <你的 profile> add github:jqlong17/dsh-meeting-memo
 
 关掉插件后不再录音、不再整理。已经写下的纪要和背景留在本机。
 
+## 手机上看
+
+DSH Pocket iOS → 「插件」→ 会议纪要 → 打开，就能看到今天采集了多少、以及最近几天的纪要。
+
+页面在 `resources/mobile/`（HTML + CSS），**每次请求重读**，改文案或样式不用重载插件；数据服务端直出，页面里不请求 RPC。
+
+自测不用拿手机：
+
+```bash
+npm run check:mobile                       # 默认 http://127.0.0.1:56283
+npm run check:mobile -- --base http://127.0.0.1:3091
+```
+
 ## 它访问什么
 
 这一节是为了让你在装之前就知道边界。

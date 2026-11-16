@@ -1,6 +1,6 @@
 {
   "name": "dsh-meeting-memo",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Meeting minutes in the right sidebar: local capture, transcription, and structured minutes.",
   "type": "module",
   "main": "./lib/index.js",
@@ -32,6 +32,12 @@
     },
     "hub": {
       "summary": "把会议录音变成结构化纪要：本地转写、要点、决策与待办。"
+    },
+    "mobile": {
+      "version": 1,
+      "kind": "web",
+      "title": "会议纪要",
+      "path": "/dsh-meeting-memo/mobile"
     }
   },
   "scripts": {
@@ -40,10 +46,12 @@
     "build:client": "node ./scripts/build-client.mjs",
     "check:client": "node ./scripts/check-client.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "check:mobile": "node selftest-mobile.mjs"
   },
   "files": [
     "src",
+    "resources",
     "lib",
     "scripts",
     "cordis.patch.yml",
