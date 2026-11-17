@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { addLabel, readLabels, removeLabelLine } from '../src/speaker-labels.ts'
+import { addLabel, readLabels, removeLabelLine, removeLabelLines } from '../src/speaker-labels.ts'
 
 function home(): string {
   return mkdtempSync(path.join(os.tmpdir(), 'mm-line-'))
@@ -30,6 +30,28 @@ test('删掉最后一句时整条标注一起消失', () => {
   try {
     const { item: label } = addLabel(dir, { day: '2026-11-17', start: 60, end: 62, label: '朝飞', lines: [5] })
     assert.equal(removeLabelLine(dir, label.id, 5), null)
+    assert.equal(readLabels(dir).length, 0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('批量摘句：一次删多行，只影响选中的', () => {
+  const dir = home()
+  try {
+    const { item } = addLabel(dir, { day: '2026-11-17', start: 60, end: 62, label: '朝飞', lines: [1, 2, 3, 4] })
+    const rest = removeLabelLines(dir, item.id, [2, 4])
+    assert.deepEqual(rest?.lines, [1, 3])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('批量摘句：选中的是全部时整条消失', () => {
+  const dir = home()
+  try {
+    const { item } = addLabel(dir, { day: '2026-11-17', start: 60, end: 62, label: '朝飞', lines: [7, 8] })
+    assert.equal(removeLabelLines(dir, item.id, [7, 8]), null)
     assert.equal(readLabels(dir).length, 0)
   } finally {
     rmSync(dir, { recursive: true, force: true })

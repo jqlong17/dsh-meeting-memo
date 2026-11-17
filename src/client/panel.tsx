@@ -286,6 +286,7 @@ export function Panel(props: PanelProps) {
   const [spkPicked, setSpkPicked] = useState<string[]>([])
   const [openLabel, setOpenLabel] = useState<string | null>(null)
   const [labelLines, setLabelLines] = useState<Record<string, Array<{ line: number; startAt: string; track: string; text: string; speaker?: string }>>>({})
+  const [linePicked, setLinePicked] = useState<number[]>([])
 
   const toggleLabel = async (item: { id: string; day: string }) => {
     if (openLabel === item.id) {
@@ -293,10 +294,32 @@ export function Panel(props: PanelProps) {
       return
     }
     setOpenLabel(item.id)
+    setLinePicked([])
     const result = await rpc<{ lines: Array<{ line: number; startAt: string; track: string; text: string; speaker?: string }> }>(
       'speaker.labelLines', { day: item.day, labelId: item.id },
     )
     if (result.ok) setLabelLines((previous) => ({ ...previous, [item.id]: result.value.lines }))
+  }
+
+  const removePickedLines = async (item: { id: string; day: string }) => {
+    if (!linePicked.length) return
+    const result = await rpc<{ removed: number; cleared: number; remaining: number; deleted: boolean }>(
+      'speaker.labelRemoveLines', { day: item.day, labelId: item.id, lines: linePicked },
+    )
+    if (!result.ok) {
+      setNoticeError(result.error.message)
+      return
+    }
+    const dropped = new Set(linePicked)
+    setLabelLines((previous) => ({
+      ...previous,
+      [item.id]: (previous[item.id] ?? []).filter((row) => !dropped.has(row.line)),
+    }))
+    setLinePicked([])
+    setNotice(t('panel.speaker.linesRemoved').replace('{n}', String(result.value.removed)))
+    void loadSpeaker()
+    void loadAssign(item.day)
+    if (result.value.deleted) setOpenLabel(null)
   }
 
   const removeLine = async (item: { id: string; day: string }, line: number) => {
@@ -1693,10 +1716,50 @@ export function Panel(props: PanelProps) {
                     </div>
                     {openLabel === item.id ? (
                       <div style={{ marginTop: 6, borderTop: `1px solid ${BORDER}`, paddingTop: 4 }}>
+                        {/* 批量：全选 / 全不选 / 删选中的句子 */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                          <span style={{ ...smallStyle, color: linePicked.length ? ACCENT : CAPTION }}>
+                            {t('panel.speaker.picked').replace('{n}', String(linePicked.length))}
+                          </span>
+                          <button
+                            type="button"
+                            style={{ ...buttonStyle, padding: '1px 6px', fontSize: FS.xs }}
+                            onClick={() => setLinePicked((labelLines[item.id] ?? []).map((row) => row.line))}
+                          >
+                            {t('panel.speaker.pickAll')}
+                          </button>
+                          <button
+                            type="button"
+                            style={{ ...buttonStyle, padding: '1px 6px', fontSize: FS.xs }}
+                            disabled={!linePicked.length}
+                            onClick={() => setLinePicked([])}
+                          >
+                            {t('panel.speaker.pickNone')}
+                          </button>
+                          <button
+                            type="button"
+                            style={{ ...buttonStyle, padding: '1px 6px', fontSize: FS.xs, color: DANGER }}
+                            disabled={!linePicked.length}
+                            onClick={() => void removePickedLines(item)}
+                          >
+                            {t('panel.speaker.deletePicked').replace('{n}', String(linePicked.length))}
+                          </button>
+                        </div>
                         {(labelLines[item.id] ?? []).length === 0 ? (
                           <div style={smallStyle}>{t('panel.speaker.noLines')}</div>
-                        ) : (labelLines[item.id] ?? []).map((row) => (
-                          <div key={row.line} style={{ display: 'grid', gridTemplateColumns: '62px 44px minmax(0, 1fr) auto', columnGap: 8, padding: '3px 0', borderBottom: `1px solid ${BORDER}`, alignItems: 'start' }}>
+                        ) : (labelLines[item.id] ?? []).map((row) => {
+                          const picked = linePicked.includes(row.line)
+                          return (
+                          <div key={row.line} style={{ display: 'grid', gridTemplateColumns: '16px 62px 44px minmax(0, 1fr) auto', columnGap: 8, padding: '3px 0', borderBottom: `1px solid ${BORDER}`, alignItems: 'start', background: picked ? 'var(--pl-brand-soft)' : 'transparent' }}>
+                            <input
+                              type="checkbox"
+                              checked={picked}
+                              onChange={() => setLinePicked((previous) => (
+                                previous.includes(row.line) ? previous.filter((value) => value !== row.line) : [...previous, row.line]
+                              ))}
+                              style={{ marginTop: 2 }}
+                              aria-label={t('panel.speaker.pick')}
+                            />
                             <span style={{ fontFamily: MONO, fontSize: FS.xs, color: CAPTION, fontVariantNumeric: 'tabular-nums' }}>
                               {clock(minuteOfDay(row.startAt), true)}
                             </span>
@@ -1710,7 +1773,8 @@ export function Panel(props: PanelProps) {
                               {t('panel.speaker.deleteLine')}
                             </button>
                           </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     ) : null}
                   </div>

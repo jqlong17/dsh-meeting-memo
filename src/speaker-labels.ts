@@ -106,12 +106,15 @@ export function deleteLabel(home: string, id: string): SpeakerLabel[] {
  * 从一条标注里摘掉某一句。
  * 句子删空就把整条标注删掉；返回剩下的标注（或 null 表示已删除）。
  */
-export function removeLabelLine(home: string, labelId: string, line: number): SpeakerLabel | null {
+/** 批量摘掉若干句；一次读改写，避免逐句 IO。 */
+export function removeLabelLines(home: string, labelId: string, lines: number[]): SpeakerLabel | null {
+  const drop = new Set(lines.filter((line) => Number.isFinite(line) && line > 0))
+  if (!drop.size) return readLabels(home).find((item) => item.id === labelId) ?? null
   const items = readLabels(home)
   const index = items.findIndex((item) => item.id === labelId)
   if (index < 0) return null
   const item = items[index]
-  const rest = (item.lines ?? []).filter((value) => value !== line)
+  const rest = (item.lines ?? []).filter((value) => !drop.has(value))
   if (!rest.length) {
     items.splice(index, 1)
     writeAll(home, items)
@@ -121,6 +124,10 @@ export function removeLabelLine(home: string, labelId: string, line: number): Sp
   items[index] = next
   writeAll(home, items)
   return next
+}
+
+export function removeLabelLine(home: string, labelId: string, line: number): SpeakerLabel | null {
+  return removeLabelLines(home, labelId, [line])
 }
 
 export function groupByDay(items: SpeakerLabel[]): Array<{ day: string; items: SpeakerLabel[] }> {

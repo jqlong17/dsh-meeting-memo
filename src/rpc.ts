@@ -23,7 +23,7 @@ import { ModelDownloads } from './model-download.ts'
 import { defaultDownloadRoot, offerMatches, offersForPlatform } from './model-catalog.ts'
 import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
-import { addLabel, deleteLabel, groupByDay, readLabels, removeLabelLine } from './speaker-labels.ts'
+import { addLabel, deleteLabel, groupByDay, readLabels, removeLabelLine, removeLabelLines } from './speaker-labels.ts'
 import { readDayMap, listDays, writeDay } from './speaker-assignments.ts'
 import { readEmbMap } from './emb-store.ts'
 import { backfillLabel } from './speaker-backfill.ts'
@@ -646,6 +646,28 @@ async function dispatch(
         }
       }
       return { day, labelId, label: label.label, lines }
+    }
+    case 'speaker.labelRemoveLines': {
+      // 批量摘句：一次读改写，同时清掉这些行的归属
+      const day = String(payload.day || '')
+      const labelId = String(payload.labelId || '')
+      const raw = Array.isArray(payload.lines) ? payload.lines : []
+      const lines = raw.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)
+      if (!lines.length) throw new MeetingError('BAD_LINE', '没有要删除的句子')
+      const rest = removeLabelLines(service.config.home, labelId, lines)
+      const map = readDayMap(service.config.home, day)
+      let cleared = 0
+      for (const line of lines) {
+        if (map[String(line)]) {
+          delete map[String(line)]
+          cleared += 1
+        }
+      }
+      if (cleared) {
+        writeDay(service.config.home, day, map)
+        service.invalidateSpeakerCache()
+      }
+      return { removed: lines.length, cleared, remaining: rest?.lines?.length ?? 0, deleted: rest === null }
     }
     case 'speaker.labelRemoveLine': {
       // 摘掉某一句：既从标注里删掉，也清掉它的归属，避免还挂着错名字
