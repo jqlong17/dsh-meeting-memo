@@ -1526,10 +1526,8 @@ export function Panel(props: PanelProps) {
   const renderSpeaker = () => {
     const onToday = Boolean(data && data.day === data.today)
     const now = clockNow()
-    const range = {
-      start: spkStart ?? Math.max(data?.window.start ?? 0, now - 10),
-      end: spkEnd ?? now,
-    }
+    // 默认区间必须和 speakerRange() 一致：整天；12 点前先给最近 2 小时
+    const range = speakerRange()
     const minutes = Math.max(0, Math.round(range.end - range.start))
     const bucketsInRange = (data?.buckets ?? []).filter((bucket) => (
       bucket.m >= Math.floor(range.start) && bucket.m < Math.ceil(range.end)
