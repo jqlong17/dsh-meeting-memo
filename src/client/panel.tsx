@@ -1897,26 +1897,12 @@ export function Panel(props: PanelProps) {
             <div style={{ ...smallStyle, marginTop: 6, color: WARN, lineHeight: 1.5 }}>{asr.notice}</div>
           ) : null}
           {hbDay && hbDay.points.length ? (
-            <div style={{ marginTop: 6 }}>
-              <div style={{ display: 'flex', gap: 1, height: 14, borderRadius: RADIUS_CHIP, overflow: 'hidden', background: SURFACE_SOFT }}>
-                {hbDay.points.map((point) => (
-                  <span
-                    key={point.minute}
-                    title={`${String(Math.floor(point.minute / 60)).padStart(2, '0')}:${String(point.minute % 60).padStart(2, '0')} ${t(`panel.asr.hb.state.${point.state}`)}`}
-                    style={{
-                      flex: '1 1 0',
-                      background: point.state === 'ok' ? SUCCESS : point.state === 'idle' ? BORDER : DANGER,
-                      opacity: point.state === 'idle' ? 0.8 : 1,
-                    }}
-                  />
-                ))}
-              </div>
-              <div style={{ ...smallStyle, marginTop: 4, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <span style={{ color: SUCCESS }}>{t('panel.asr.hb.legend.ok')} {hbDay.summary.ok}</span>
-                <span>{t('panel.asr.hb.legend.idle')} {hbDay.summary.idle}</span>
-                <span style={{ color: DANGER }}>{t('panel.asr.hb.legend.gap')} {hbDay.summary.gap}</span>
-              </div>
-            </div>
+            <HeartbeatChart
+              points={hbDay.points}
+              summary={hbDay.summary}
+              range={hbRange}
+              t={t}
+            />
           ) : null}
           <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.45 }}>{t('panel.asr.hb.hint')}</div>
         </div>
@@ -2996,6 +2982,163 @@ function trackColor(track: string): string {
  * 程序堆 / 音频缓冲 / 固定开销，叠起来就是常驻占用。
  * 映射的模型文件（可回收）不参与堆叠，单独一条虚线画在下面，避免把其他分类压扁。
  */
+
+/**
+ * 链路心跳的趋势图：和内存图同一套观感（05 分钟/1 小时/全天、拖动框选、悬停提示）。
+ * 纵轴是每格里的语音秒数，红色竖带表示那一段没有采集。
+ */
+function HeartbeatChart({ points, summary, range, t }: {
+  points: Array<{ minute: number; state: 'ok' | 'idle' | 'gap'; speech: number; snippets: number }>
+  summary: { total: number; ok: number; idle: number; gap: number }
+  range: 'minute' | 'hour' | 'day'
+  t: (key: string) => string
+}): ReactElement {
+  const width = 560
+  const height = 72
+  const pad = 6
+  const start = points[0]?.minute ?? 0
+  const end = (points.at(-1)?.minute ?? 0) + (range === 'day' ? 5 : 1)
+  const span = Math.max(1, end - start)
+  const [zoom, setZoom] = useState<{ start: number; end: number } | null>(null)
+  const [dragging, setDragging] = useState<{ anchor: number; current: number } | null>(null)
+  const [hover, setHover] = useState<{ x: number; point: { minute: number; state: string; speech: number; snippets: number } } | null>(null)
+  const viewStart = zoom ? zoom.start : start
+  const viewEnd = zoom ? zoom.end : end
+  const viewSpan = Math.max(1, viewEnd - viewStart)
+  const xAt = (minute: number): number => ((Math.min(viewEnd, Math.max(viewStart, minute)) - viewStart) / viewSpan) * width
+  const minuteAt = (px: number): number => viewStart + (px / width) * viewSpan
+  const step = points.length > 1 ? Math.max(1, points[1].minute - points[0].minute) : 1
+  const maxSpeech = Math.max(1, ...points.map((point) => point.speech))
+  const yAt = (value: number): number => height - pad - (value / maxSpeech) * (height - pad * 2)
+  const visible = points.filter((point) => point.minute + step > viewStart && point.minute < viewEnd)
+  const line = visible.length
+    ? `M${visible.map((point) => `${xAt(point.minute).toFixed(1)},${yAt(point.speech).toFixed(1)}`).join(' L')}`
+    : ''
+  const area = visible.length
+    ? `${line} L${xAt(visible.at(-1)!.minute).toFixed(1)},${height - pad} L${xAt(visible[0].minute).toFixed(1)},${height - pad} Z`
+    : ''
+  const ticks = range === 'minute'
+    ? [0, 1, 2, 3, 4, 5].map((offset) => Math.round(viewStart + offset))
+    : range === 'hour'
+      ? [0, 15, 30, 45, 60].map((offset) => Math.round(viewStart + offset))
+      : [0, 360, 720, 1080, 1440]
+  const label = (minute: number): string => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${range === 'minute' ? String(Math.round(minute % 60)).padStart(2, '0') : '00'}`
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ position: 'relative' }}>
+        <svg
+          viewBox={`0 0 ${width} ${height + 14}`}
+          width="100%"
+          height={height + 14}
+          role="img"
+          style={{ display: 'block', background: SURFACE_SOFT, borderRadius: RADIUS_CHIP, cursor: 'crosshair', touchAction: 'none' }}
+          onPointerDown={(event) => {
+            if (!event.isPrimary) return
+            const rect = event.currentTarget.getBoundingClientRect()
+            const minute = minuteAt(((event.clientX - rect.left) / rect.width) * width)
+            setDragging({ anchor: minute, current: minute })
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }}
+          onPointerMove={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+            const minute = minuteAt(ratio * width)
+            if (dragging) setDragging({ ...dragging, current: minute })
+            if (!visible.length) return
+            let nearest = visible[0]
+            let distance = Math.abs(visible[0].minute - minute)
+            for (const point of visible) {
+              const diff = Math.abs(point.minute - minute)
+              if (diff < distance) { nearest = point; distance = diff }
+            }
+            setHover({ x: ratio * 100, point: nearest })
+          }}
+          onPointerUp={(event) => {
+            if (!dragging) return
+            const from = Math.min(dragging.anchor, dragging.current)
+            const to = Math.max(dragging.anchor, dragging.current)
+            setDragging(null)
+            try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* 已释放 */ }
+            if (to - from >= (range === 'day' ? 10 : 1)) setZoom({ start: from, end: to })
+          }}
+          onPointerCancel={() => { setDragging(null); setHover(null) }}
+          onPointerLeave={() => setHover(null)}
+        >
+          {visible.filter((point) => point.state === 'gap').map((point) => (
+            <rect
+              key={`gap-${point.minute}`}
+              x={xAt(point.minute)}
+              y={0}
+              width={Math.max(1, (width / viewSpan) * step)}
+              height={height}
+              fill={DANGER}
+              opacity={0.12}
+            />
+          ))}
+          {area ? <path d={area} fill={ACCENT} opacity={0.12} /> : null}
+          {line ? <path d={line} fill="none" stroke={ACCENT} strokeWidth={2} vectorEffect="non-scaling-stroke" /> : null}
+          {dragging && Math.abs(dragging.current - dragging.anchor) > 0.2 ? (
+            <rect
+              x={xAt(Math.min(dragging.anchor, dragging.current))}
+              y={0}
+              width={Math.abs(xAt(dragging.current) - xAt(dragging.anchor))}
+              height={height}
+              fill={ACCENT}
+              opacity={0.12}
+            />
+          ) : null}
+          {ticks.map((minute) => (
+            <text key={minute} x={xAt(minute)} y={height + 11} fontSize={9} fill={CAPTION} textAnchor={minute === 0 ? 'start' : minute === 1440 ? 'end' : 'middle'}>
+              {label(minute)}
+            </text>
+          ))}
+        </svg>
+        {hover ? (
+          <div style={{
+            position: 'absolute',
+            top: 4,
+            left: `calc(${hover.x}% + ${hover.x > 55 ? -12 : 12}px)`,
+            transform: hover.x > 55 ? 'translateX(-100%)' : 'none',
+            pointerEvents: 'none',
+            background: 'Canvas',
+            color: 'CanvasText',
+            border: `1px solid ${CARD_BORDER}`,
+            borderRadius: RADIUS,
+            boxShadow: '0 8px 24px rgba(16,24,40,.22)',
+            padding: '5px 8px',
+            fontSize: FS.xs,
+            lineHeight: 1.6,
+            whiteSpace: 'nowrap',
+            zIndex: 2,
+          }}>
+            <div style={{ fontFamily: MONO, fontWeight: 600 }}>
+              {`${String(Math.floor(hover.point.minute / 60)).padStart(2, '0')}:${String(Math.round(hover.point.minute % 60)).padStart(2, '0')}`}
+              {'  '}
+              {t(`panel.asr.hb.state.${hover.point.state}`)}
+            </div>
+            <div style={{ color: FG2 }}>
+              {t('panel.asr.hb.tipSpeech').replace('{s}', hover.point.speech.toFixed(1))}
+              {' · '}
+              {t('panel.asr.hb.tipRows').replace('{n}', String(hover.point.snippets))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <div style={{ ...smallStyle, marginTop: 4, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ color: SUCCESS }}>{t('panel.asr.hb.legend.ok')} {summary.ok}</span>
+        <span>{t('panel.asr.hb.legend.idle')} {summary.idle}</span>
+        <span style={{ color: DANGER }}>{t('panel.asr.hb.legend.gap')} {summary.gap}</span>
+        {zoom ? (
+          <button type="button" style={{ ...buttonStyle, marginLeft: 'auto' }} onClick={() => setZoom(null)}>
+            {t('panel.asr.mem.resetZoom')}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function MemoryTimeline({ samples, day, range, onRange, t }: {
   samples: MemorySampleDTO[]
   day: Array<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }>
