@@ -1447,8 +1447,10 @@ export function Panel(props: PanelProps) {
     ))
     const capturedMinutes = bucketsInRange.length
     const speechMinutes = bucketsInRange.reduce((sum, bucket) => sum + Math.max(0, bucket.s), 0) / 60
+    // 渲染走这里，必须和 speakerRows() 用同一个轨道筛选，否则按钮点了列表不变
     const rows = (data?.segments ?? [])
       .filter((segment) => segment.e > range.start && segment.s < range.end)
+      .filter((segment) => spkTrack === 'all' || segment.track === spkTrack)
       .reverse()
     const groups = speaker?.groups ?? []
     return (
