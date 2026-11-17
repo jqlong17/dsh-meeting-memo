@@ -8,7 +8,7 @@ setDemoActive(true)
 
 test('夹具日期和规模稳定', () => {
   assert.equal(DEMO_DATA.day.day, '2026-11-17')
-  assert.equal(DEMO_DATA.day.segments.length, 14)
+  assert.ok(DEMO_DATA.day.segments.length >= 30, `四场会应有 30 条以上转写，实际 ${DEMO_DATA.day.segments.length}`)
   assert.ok(DEMO_DATA.day.stats.speechMinutes > 0)
   assert.ok(DEMO_DATA.day.buckets.length > 0)
 })

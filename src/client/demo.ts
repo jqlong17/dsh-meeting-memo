@@ -35,33 +35,115 @@ function at(hour: number, minute: number): string {
  * 14 条转写，覆盖「有名字 / 未识别 / 系统轨 / 麦克风轨」四种形态。
  * 内容围绕虚构产品 v2.4 的发布评审：灰度、回滚、埋点、压测。
  */
-const SEGMENTS = [
-  { s: 545, e: 546.6, track: 'system', text: '人都到齐了，今天主要过 v2.4 的发布评审，重点看灰度范围和回滚预案。', speaker: '苏晴', speakerScore: 0.91, line: 1 },
-  { s: 547, e: 548.8, track: 'system', text: '先说结论：功能都验收完了，剩下的风险集中在移动端兼容。', speaker: '苏晴', speakerScore: 0.88, line: 2 },
-  { s: 550, e: 551.8, track: 'mic', text: '移动端我先说一句，iOS 15 上那个编辑器闪烁昨天已经修了，Android 还差一版。', speaker: '林知远', speakerScore: 0.84, line: 3 },
-  { s: 553, e: 554.6, track: 'system', text: '那灰度能不能先只放桌面端？移动端我跟一版再放。', speaker: '陈默', speakerScore: 0.79, line: 4 },
-  { s: 556, e: 557.6, track: 'system', text: '可以，灰度策略本来就是按端拆的，改一下配置就行。', speaker: '苏晴', speakerScore: 0.82, line: 5 },
-  { s: 559, e: 560.2, track: 'mic', text: '回滚脚本我今天跑了一遍，从 50% 退回 0 大概两分半，比上次快。', speaker: '林知远', speakerScore: 0.86, line: 6 },
-  { s: 562, e: 563.6, track: 'system', text: '两分半能接受。埋点那边确认过了吗？新版本的分析要看得到转化。', line: 7 },
-  { s: 565, e: 566.4, track: 'system', text: '埋点上周就上了，事件名我贴在变更清单里，别改。', speaker: '陈默', speakerScore: 0.78, line: 8 },
-  { s: 568, e: 569.6, track: 'mic', text: '压测结果也出来了，峰值下 P99 是三百二十毫秒，比目标差一点。', speaker: '林知远', speakerScore: 0.81, line: 9 },
-  { s: 571, e: 572.4, track: 'system', text: '三百二在可接受范围，先上线观察，超过四百我们再动手。', speaker: '苏晴', speakerScore: 0.85, line: 10 },
-  { s: 574, e: 575.2, track: 'system', text: '那时间就定周四晚上八点，我先发公告，文案今天下午给。', speaker: '陈默', speakerScore: 0.8, line: 11 },
-  { s: 576, e: 577.4, track: 'mic', text: '好，我周四下午提前把监控看板配好。', speaker: '林知远', speakerScore: 0.76, line: 12 },
-  { s: 579, e: 580, track: 'system', text: '那就这么定，散会。', line: 13 },
-  { s: 581, e: 582, track: 'mic', text: '辛苦大家。', line: 14 },
+type DemoLine = {
+  /** 相对本场开始的秒数，用来推 s / e。 */
+  at: number
+  dur: number
+  track: 'system' | 'mic'
+  text: string
+  who?: string
+  score?: number
+}
+
+/** 四场会，覆盖上午到下午；中间留空档，时间轴才像真的一天。 */
+const MEETINGS: Array<{ start: number; minutes: number; title: string; lines: DemoLine[] }> = [
+  {
+    start: 545, // 09:05 发布评审
+    minutes: 37,
+    title: 'v2.4 发布评审',
+    lines: [
+      { at: 0, dur: 5, track: 'system', text: '人都到齐了，今天过 v2.4 的发布评审，重点看灰度范围和回滚预案。', who: '苏晴', score: 0.91 },
+      { at: 6, dur: 6, track: 'system', text: '先说结论：功能都验收完了，风险集中在移动端兼容。', who: '苏晴', score: 0.88 },
+      { at: 14, dur: 7, track: 'mic', text: '移动端我先说一句，iOS 15 那个编辑器闪烁昨天修了，Android 还差一版。', who: '林知远', score: 0.84 },
+      { at: 23, dur: 6, track: 'system', text: '那灰度能不能先只放桌面端？移动端我跟一版再放。', who: '陈默', score: 0.79 },
+      { at: 31, dur: 6, track: 'system', text: '可以，灰度策略本来就是按端拆的，改一下配置就行。', who: '苏晴', score: 0.82 },
+      { at: 39, dur: 7, track: 'mic', text: '回滚脚本我今天跑了一遍，从 50% 退回 0 大概两分半。', who: '林知远', score: 0.86 },
+      { at: 48, dur: 8, track: 'system', text: '两分半能接受。埋点那边确认过了吗？新版本的分析要看得到转化。' },
+      { at: 58, dur: 7, track: 'system', text: '埋点上周就上了，事件名我贴在变更清单里，别改。', who: '陈默', score: 0.78 },
+      { at: 67, dur: 7, track: 'mic', text: '压测结果也出来了，峰值下 P99 是三百二十毫秒。', who: '林知远', score: 0.81 },
+      { at: 76, dur: 7, track: 'system', text: '三百二在可接受范围，先上线观察，超过四百我们再动手。', who: '苏晴', score: 0.85 },
+      { at: 85, dur: 6, track: 'system', text: '时间就定周四晚上八点，我先发公告，文案今天下午给。', who: '陈默', score: 0.8 },
+      { at: 93, dur: 6, track: 'mic', text: '好，我周四下午提前把监控看板配好。', who: '林知远', score: 0.76 },
+      { at: 101, dur: 4, track: 'system', text: '那就这么定，散会。' },
+    ],
+  },
+  {
+    start: 630, // 10:30 客户沟通
+    minutes: 28,
+    title: '客户沟通：私有化部署排期',
+    lines: [
+      { at: 0, dur: 6, track: 'system', text: '周老师您好，今天主要对一下私有化部署的排期和前置条件。', who: '陈默', score: 0.87 },
+      { at: 8, dur: 7, track: 'system', text: '我们这边希望月底前跑起来，选一个部门先试。', who: '周叙', score: 0.72 },
+      { at: 17, dur: 8, track: 'mic', text: '部署包我周三之前给到，包含离线和在线两套配置。', who: '林知远', score: 0.83 },
+      { at: 27, dur: 7, track: 'system', text: '环境上有什么硬要求？我们现在是两台机器，内存各 64G。', who: '周叙', score: 0.75 },
+      { at: 36, dur: 8, track: 'mic', text: '两台够用，单机至少 32G，磁盘最好留 500G 给索引。', who: '林知远', score: 0.8 },
+      { at: 46, dur: 6, track: 'system', text: '好，那我这边先申请资源，白名单要开哪些？', who: '周叙', score: 0.7 },
+      { at: 54, dur: 9, track: 'system', text: '两个出网地址，我把清单发您，邮件里附上部署手册。', who: '陈默', score: 0.86 },
+      { at: 65, dur: 6, track: 'system', text: '收到，那我们下周一再对一次进度。', who: '周叙', score: 0.73 },
+      { at: 73, dur: 5, track: 'mic', text: '好，我周一上午把环境先验一遍。', who: '林知远', score: 0.78 },
+    ],
+  },
+  {
+    start: 850, // 14:10 设计评审
+    minutes: 26,
+    title: '设计评审：模板市场交互',
+    lines: [
+      { at: 0, dur: 6, track: 'system', text: '下午这场过一下模板市场的交互稿，重点是空状态和权限提示。', who: '陈默', score: 0.88 },
+      { at: 8, dur: 8, track: 'system', text: '空状态我改了一版，不再是一整块插画，改成一句说明加两个入口。', who: '陈默', score: 0.84 },
+      { at: 18, dur: 7, track: 'mic', text: '两个入口会不会太重？我倾向只留「从模板创建」。', who: '苏晴', score: 0.79 },
+      { at: 27, dur: 7, track: 'system', text: '那新建的时候就少了一条路，用户得先退出再进来。' },
+      { at: 36, dur: 8, track: 'mic', text: '可以在新建弹窗里加一个「看看模板」，不用单独占位。', who: '苏晴', score: 0.82 },
+      { at: 46, dur: 6, track: 'system', text: '这个我同意，成本也低。权限那块按原来的方案？', who: '陈默', score: 0.81 },
+      { at: 54, dur: 7, track: 'mic', text: '对，只读用户看不到编辑入口，这点上周已经改过了。', who: '苏晴', score: 0.77 },
+      { at: 63, dur: 6, track: 'system', text: '行，那我把稿子更新一下，明天同步给前端。', who: '陈默', score: 0.83 },
+    ],
+  },
+  {
+    start: 960, // 16:00 复盘
+    minutes: 18,
+    title: '发布复盘',
+    lines: [
+      { at: 0, dur: 6, track: 'system', text: '复盘一下这次灰度暴露的两个问题，一个是监控告警延迟。', who: '苏晴', score: 0.86 },
+      { at: 8, dur: 8, track: 'system', text: '告警延迟是因为采样窗口设太长了，改成三十秒就够。', who: '林知远', score: 0.8 },
+      { at: 18, dur: 7, track: 'mic', text: '第二个是回滚之后缓存没清干净，用户还看到新版界面。', who: '林知远', score: 0.84 },
+      { at: 27, dur: 8, track: 'system', text: '这个得写进回滚清单，不能只靠人记。', who: '苏晴', score: 0.82 },
+      { at: 37, dur: 6, track: 'system', text: '我来补清单，顺便加到发布检查项里。', who: '陈默', score: 0.79 },
+      { at: 45, dur: 5, track: 'mic', text: '好，那这次就到这。', who: '苏晴', score: 0.75 },
+    ],
+  },
 ]
 
-/** 09:00–09:45，密度有起伏：开头交代、中间讨论、结尾收束。 */
-const BUCKETS = Array.from({ length: 46 }, (_, index) => 540 + index).map((minute) => {
-  const wave = Math.sin((minute - 540) / 6) * 16 + 32
-  return {
-    m: minute,
-    s: Math.max(6, Math.round(wave + (minute % 5) * 2)),
-    c: 80 + (minute % 7) * 18,
-    n: 1,
-  }
-})
+/** 把四场会摊平成片段：按场次时长均匀铺开，行号按顺序编。 */
+const SEGMENTS = MEETINGS.flatMap((meeting) => {
+  const spacing = (meeting.minutes * 60) / meeting.lines.length
+  return meeting.lines.map((line, index) => {
+    const s = meeting.start + (index * spacing) / 60
+    // 真实会议里话是连着的，只留一点点停顿，语音分钟才和会议时长对得上
+    const e = s + Math.min(52, spacing * 0.94) / 60
+    return {
+      s: Math.round(s * 100) / 100,
+      e: Math.round(e * 100) / 100,
+      track: line.track,
+      text: line.text,
+      ...(line.who ? { speaker: line.who, speakerScore: line.score } : {}),
+    }
+  })
+}).map((segment, index) => ({ ...segment, line: index + 1 }))
+
+/** 每场会覆盖到的分钟都给密度，场间留空档，时间轴才是「一天四场」的样子。 */
+const BUCKETS = MEETINGS.flatMap((meeting) => Array.from(
+  { length: meeting.minutes },
+  (_, index) => {
+    const minute = meeting.start + index
+    const wave = Math.sin((minute - meeting.start) / 3.2) * 14 + 28
+    return {
+      m: minute,
+      s: Math.max(6, Math.round(wave + (minute % 5) * 2)),
+      c: 60 + (minute % 7) * 16,
+      n: 1,
+    }
+  },
+))
 
 const DAILY: DayPayload = {
   day: DAY,
@@ -81,10 +163,11 @@ const DAILY: DayPayload = {
   stats: {
     segments: SEGMENTS.length,
     chars: SEGMENTS.reduce((sum, segment) => sum + segment.text.length, 0),
-    speechMinutes: 32.4,
-    captureMinutes: 46,
-    firstMinute: 540,
-    lastMinute: 585,
+    // 采集 121 分钟、其中 96.5 分钟有人说话，比例接近真实会议
+    speechMinutes: 96.5,
+    captureMinutes: MEETINGS.reduce((sum, meeting) => sum + meeting.minutes, 0) + 12,
+    firstMinute: MEETINGS[0].start,
+    lastMinute: MEETINGS[MEETINGS.length - 1].start + MEETINGS[MEETINGS.length - 1].minutes,
     tracks: { mic: 5, system: 9 },
   },
   hourly: [
@@ -132,19 +215,47 @@ v2.4 功能开发已收尾，本次评审确认灰度范围、回滚预案与上
 
 const SESSION_TWO = `> 💡 **本场背景与目标**
 
-周会同步本周进度与风险，确认下周节奏。
+客户希望月底前跑通私有化部署试点，本次对齐排期与前置条件。
 
 ### 核心结论
 
-- 桌面端开发已完成，进入灰度准备。
-- 测试用例补齐到 118 条，覆盖率 92%。
-- 下周重点是移动端与文档更新。
+- 部署包周三前交付，含离线与在线两套配置。
+- 环境要求：单机 32G 内存起，磁盘预留 500G。
+- 客户侧需开放两个出网白名单。
 
 ### TODO
 
-- 周四下班前交周报 — 全体
-- 补移动端兼容用例 — 苏晴
-- 更新帮助中心截图 — 陈默`
+- 交付部署包与部署手册 — 林知远
+- 发送白名单清单 — 陈默
+- 下周一验收环境 — 林知远`
+
+const SESSION_THREE = `> 💡 **本场背景与目标**
+
+模板市场的交互稿评审，重点是空状态和权限提示。
+
+### 核心结论
+
+- 空状态改成一句说明加一个入口，不再放大插画。
+- 「看看模板」放进新建弹窗，不单独占位。
+- 只读用户的编辑入口保持隐藏。
+
+### TODO
+
+- 更新交互稿并同步前端 — 陈默`
+
+const SESSION_FOUR = `> 💡 **本场背景与目标**
+
+复盘本次灰度暴露的两个问题：告警延迟、回滚后缓存未清。
+
+### 核心结论
+
+- 告警采样窗口从 5 分钟改成 30 秒。
+- 回滚清单增加「清缓存」步骤，写进发布检查项。
+
+### TODO
+
+- 补回滚清单并加入发布检查 — 陈默
+- 调整告警采样窗口 — 林知远`
 
 const SESSIONS = [
   {
@@ -158,12 +269,30 @@ const SESSIONS = [
   },
   {
     id: 'demo-2',
-    start: 600,
-    end: 620,
-    topic: '周会：本周进度与风险',
+    start: 630,
+    end: 658,
+    topic: '客户沟通：私有化部署排期',
     content: SESSION_TWO,
     source: 'ai' as const,
-    updatedAt: at(10, 32),
+    updatedAt: at(11, 2),
+  },
+  {
+    id: 'demo-3',
+    start: 850,
+    end: 876,
+    topic: '设计评审：模板市场交互',
+    content: SESSION_THREE,
+    source: 'ai' as const,
+    updatedAt: at(14, 40),
+  },
+  {
+    id: 'demo-4',
+    start: 960,
+    end: 978,
+    topic: '发布复盘',
+    content: SESSION_FOUR,
+    source: 'ai' as const,
+    updatedAt: at(16, 20),
   },
 ]
 
@@ -191,7 +320,7 @@ const RANGE: MinutesRangeDTO = {
   mode: 'week',
   today: DAY,
   days: ['2026-11-16', DAY],
-  total: 3,
+  total: 5, // 今天 4 场 + 昨天 1 场
   groups: [
     { day: DAY, sessions: SESSIONS, mdPath: `/Users/demo/.dsh/meeting-memo/minutes/${DAY}.md` },
     {
@@ -275,9 +404,10 @@ const JOBS: JobDTO[] = [
     end: 620,
     backgroundIds: [],
     status: 'running',
-    createdAt: at(10, 30),
-    startedAt: at(10, 30),
-    topic: '周会：本周进度与风险',
+    createdAt: new Date(Date.now() - 42_000).toISOString(),
+    // 从「刚刚开始」算起，截图里才不会出现「已 5810 秒」这种离谱数字
+    startedAt: new Date(Date.now() - 42_000).toISOString(),
+    topic: '发布复盘',
   },
   {
     id: 'job-3',
