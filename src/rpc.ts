@@ -233,6 +233,63 @@ async function dispatch(
       await runtime.start()
       return runtime.status()
     }
+    case 'asr.heartbeat': {
+      // 链路心跳的全天检测：每分钟一条状态（有语音 / 只采集 / 断）
+      const day = typeof payload.day === 'string' && payload.day
+        ? payload.day
+        : dayKey(service.config.timeZone)
+      const range = payload.range === 'minute' ? 'minute' : payload.range === 'hour' ? 'hour' : 'day'
+      const span = range === 'minute' ? 5 : range === 'hour' ? 60 : 1440
+      const root = path.join(service.config.home, 'asr-log', day)
+      const minutes = new Map<number, { speech: number; snippets: number }>()
+      try {
+        for (const line of readFileSync(path.join(root, 'activity.jsonl'), 'utf8').split('\n')) {
+          if (!line.trim()) continue
+          try {
+            const row = JSON.parse(line) as { startAt?: string; micSpeechSeconds?: number; systemSpeechSeconds?: number; snippetCount?: number }
+            if (!row.startAt) continue
+            const at = new Date(row.startAt)
+            const minute = at.getHours() * 60 + at.getMinutes()
+            const prev = minutes.get(minute) ?? { speech: 0, snippets: 0 }
+            minutes.set(minute, {
+              speech: prev.speech + (Number(row.micSpeechSeconds) || 0) + (Number(row.systemSpeechSeconds) || 0),
+              snippets: prev.snippets + (Number(row.snippetCount) || 0),
+            })
+          } catch {
+            // 坏行跳过
+          }
+        }
+      } catch {
+        // 没有日志就是全空
+      }
+      const now = new Date()
+      const nowMinute = now.getHours() * 60 + now.getMinutes()
+      const start = range === 'day' ? 0 : Math.max(0, nowMinute - span)
+      const end = range === 'day' ? 1440 : Math.max(span, nowMinute)
+      const step = range === 'day' ? 5 : 1
+      const points: Array<{ minute: number; state: 'ok' | 'idle' | 'gap'; speech: number; snippets: number }> = []
+      let ok = 0
+      let idle = 0
+      let gap = 0
+      for (let minute = Math.floor(start); minute < Math.ceil(end); minute += step) {
+        let speech = 0
+        let snippets = 0
+        let seen = false
+        for (let offset = 0; offset < step; offset += 1) {
+          const hit = minutes.get(minute + offset)
+          if (!hit) continue
+          seen = true
+          speech += hit.speech
+          snippets += hit.snippets
+        }
+        const state = !seen ? 'gap' : speech > 0.5 ? 'ok' : 'idle'
+        if (state === 'ok') ok += 1
+        else if (state === 'idle') idle += 1
+        else gap += 1
+        points.push({ minute, state, speech, snippets })
+      }
+      return { day, range, start, end, points, summary: { total: points.length, ok, idle, gap } }
+    }
     case 'asr.memory': {
       // 当天 00:00–24:00 的内存曲线；按 5 分钟均值降采样，最多 288 个点
       const day = typeof payload.day === 'string' && payload.day

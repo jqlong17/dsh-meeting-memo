@@ -560,6 +560,42 @@ const UPDATE: UpdateStatusDTO = {
   command: '',
 }
 
+
+/** 心跳状态条：演示当天 09:00–16:20 有采集，个别分钟是断的。 */
+const DEMO_HEARTBEAT = (() => {
+  const points = Array.from({ length: 288 }, (_, index) => {
+    const minute = index * 5
+    const inMeeting = (minute >= 545 && minute <= 585) || (minute >= 630 && minute <= 658)
+      || (minute >= 850 && minute <= 876) || (minute >= 960 && minute <= 978)
+    const captured = minute >= 540 && minute <= 985
+    const state = !captured ? 'gap' : inMeeting ? 'ok' : 'idle'
+    return { minute, state: state as 'ok' | 'idle' | 'gap', speech: inMeeting ? 240 : 0, snippets: inMeeting ? 3 : 0 }
+  })
+  const summary = points.reduce((acc, point) => {
+    acc[point.state] += 1
+    return acc
+  }, { total: points.length, ok: 0, idle: 0, gap: 0 })
+  return { day: DAY, range: 'day', start: 0, end: 1440, points, summary }
+})()
+
+/** 内存曲线：一天里缓慢起伏。 */
+const DEMO_MEMORY = (() => {
+  const samples = Array.from({ length: 288 }, (_, index) => {
+    const minute = index * 5
+    const heap = 60 + Math.round(Math.sin(index / 12) * 18 + 40)
+    return {
+      minute,
+      at: `${DAY}T${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}:00`,
+      occupied: heap + 6 + 5,
+      heap,
+      audio: 6,
+      fixed: 5,
+      mapped: 452 * 1024 * 1024,
+    }
+  })
+  return { day: DAY, range: 'day', samples }
+})()
+
 export const DEMO_DATA = {
   day: DAILY,
   minutes: MINUTES,
@@ -584,6 +620,8 @@ const READ_OPS: Record<string, unknown> = {
   'backgrounds.list': DEMO_DATA.backgrounds,
   'jobs.list': { jobs: DEMO_DATA.jobs },
   'asr.status': DEMO_DATA.asr,
+  'asr.memory': DEMO_MEMORY,
+  'asr.heartbeat': DEMO_HEARTBEAT,
   'asr.models': DEMO_DATA.models,
   'models.list': DEMO_DATA.models,
   'speaker.list': DEMO_DATA.speakers,

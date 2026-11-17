@@ -314,6 +314,20 @@ export function Panel(props: PanelProps) {
 
   const [demoMode, setDemoMode] = useState(() => isDemoActive())
   const [memoryDay, setMemoryDay] = useState<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }[]>([])
+  const [hbRange, setHbRange] = useState<'minute' | 'hour' | 'day'>('minute')
+  const [hbDay, setHbDay] = useState<{ points: Array<{ minute: number; state: 'ok' | 'idle' | 'gap'; speech: number; snippets: number }>; summary: { total: number; ok: number; idle: number; gap: number } } | null>(null)
+
+  const loadHeartbeatDay = useCallback(async (range: 'minute' | 'hour' | 'day') => {
+    const result = await rpc<{ points: Array<{ minute: number; state: 'ok' | 'idle' | 'gap'; speech: number; snippets: number }>; summary: { total: number; ok: number; idle: number; gap: number } }>('asr.heartbeat', { range })
+    if (result.ok) setHbDay({ points: result.value.points, summary: result.value.summary })
+  }, [rpc])
+
+  useEffect(() => {
+    if (tab !== 'asr') return
+    void loadHeartbeatDay(hbRange)
+    const timer = window.setInterval(() => { void loadHeartbeatDay(hbRange) }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [tab, loadHeartbeatDay, hbRange])
   const [memoryRange, setMemoryRange] = useState<'minute' | 'hour' | 'day'>('minute')
 
   const loadMemoryDay = useCallback(async (range: 'minute' | 'hour' | 'day') => {
@@ -1840,6 +1854,19 @@ export function Panel(props: PanelProps) {
             <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.asr.hb.title')}</span>
             <span style={{ ...smallStyle, color: hbColor }}>{hbLabel}</span>
             <span style={{ flex: '1 1 auto' }} />
+            {(['minute', 'hour', 'day'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                style={{
+                  ...buttonStyle,
+                  ...(hbRange === mode ? { borderColor: ACCENT, color: ACCENT, background: ACCENT_SOFT } : {}),
+                }}
+                onClick={() => setHbRange(mode)}
+              >
+                {t(`panel.asr.mem.range.${mode}`)}
+              </button>
+            ))}
             <button
               type="button"
               style={buttonStyle}
@@ -1868,6 +1895,28 @@ export function Panel(props: PanelProps) {
           </div>
           {asr?.notice ? (
             <div style={{ ...smallStyle, marginTop: 6, color: WARN, lineHeight: 1.5 }}>{asr.notice}</div>
+          ) : null}
+          {hbDay && hbDay.points.length ? (
+            <div style={{ marginTop: 6 }}>
+              <div style={{ display: 'flex', gap: 1, height: 14, borderRadius: RADIUS_CHIP, overflow: 'hidden', background: SURFACE_SOFT }}>
+                {hbDay.points.map((point) => (
+                  <span
+                    key={point.minute}
+                    title={`${String(Math.floor(point.minute / 60)).padStart(2, '0')}:${String(point.minute % 60).padStart(2, '0')} ${t(`panel.asr.hb.state.${point.state}`)}`}
+                    style={{
+                      flex: '1 1 0',
+                      background: point.state === 'ok' ? SUCCESS : point.state === 'idle' ? BORDER : DANGER,
+                      opacity: point.state === 'idle' ? 0.8 : 1,
+                    }}
+                  />
+                ))}
+              </div>
+              <div style={{ ...smallStyle, marginTop: 4, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ color: SUCCESS }}>{t('panel.asr.hb.legend.ok')} {hbDay.summary.ok}</span>
+                <span>{t('panel.asr.hb.legend.idle')} {hbDay.summary.idle}</span>
+                <span style={{ color: DANGER }}>{t('panel.asr.hb.legend.gap')} {hbDay.summary.gap}</span>
+              </div>
+            </div>
           ) : null}
           <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.45 }}>{t('panel.asr.hb.hint')}</div>
         </div>
