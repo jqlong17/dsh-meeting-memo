@@ -8,7 +8,7 @@ setDemoActive(true)
 
 test('夹具日期和规模稳定', () => {
   assert.equal(DEMO_DATA.day.day, '2026-11-17')
-  assert.equal(DEMO_DATA.day.segments.length, 12)
+  assert.equal(DEMO_DATA.day.segments.length, 14)
   assert.ok(DEMO_DATA.day.stats.speechMinutes > 0)
   assert.ok(DEMO_DATA.day.buckets.length > 0)
 })
@@ -16,6 +16,14 @@ test('夹具日期和规模稳定', () => {
 test('转写覆盖四种形态：有名字、未识别、系统轨、麦克风轨', () => {
   const segs = DEMO_DATA.day.segments
   assert.ok(segs.some((s) => s.speaker && s.speakerScore !== undefined))
+  // 全部是虚构数据：既不能出现真实同事姓名，也不能出现真实业务词汇
+  const dump = JSON.stringify(DEMO_DATA)
+  for (const forbidden of [
+    '张思齐', '肖晓东', '龙嘉奇', '龙佳奇',
+    '本体', '客座率', '合同评审', '航信', '中航信', '文档解析', '数据治理',
+  ]) {
+    assert.ok(!dump.includes(forbidden), `夹具里不能出现真实数据痕迹：${forbidden}`)
+  }
   assert.ok(segs.some((s) => !s.speaker))
   assert.ok(segs.some((s) => s.track === 'system'))
   assert.ok(segs.some((s) => s.track === 'mic'))
