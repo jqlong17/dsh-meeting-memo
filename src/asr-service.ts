@@ -85,6 +85,38 @@ function pidFile(home: string): string {
   return path.join(home, 'asr-helper.pid')
 }
 
+/**
+ * 扫描本插件目录下的全部 helper 进程，杀掉不属于本次启动的那些。
+ *
+ * 为什么需要：pid 文件只记得最后一个 helper。调试用的探针、被 SIGTERM 忽略的僵尸、
+ * 崩溃后没来得及清理的进程都不会出现在 pid 文件里，却都在抢同一个麦克风——
+ * 结果就是面板显示「可用」但录不到，或者名字停在旧设备上。
+ */
+function sweepHelpers(home: string): void {
+  const marker = path.join(home, 'bin', 'asr-helper')
+  let out = ''
+  try {
+    out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
+  } catch {
+    return
+  }
+  for (const line of out.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const space = trimmed.indexOf(' ')
+    if (space <= 0) continue
+    const pid = Number(trimmed.slice(0, space))
+    const command = trimmed.slice(space + 1)
+    if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) continue
+    if (!command.includes(marker) || !command.includes('capture')) continue
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      // 已经退出
+    }
+  }
+}
+
 function reapStaleHelper(home: string): void {
   let pid = 0
   try {
@@ -455,6 +487,7 @@ export class AsrRuntime {
 
   private spawn(helper: string, model: AsrModel): void {
     reapStaleHelper(this.home)
+    sweepHelpers(this.home)
     const day = dayKey(this.timeZone)
     const audio = path.join(this.logRoot(), day, 'audio')
     const external = model.kind !== 'coreml-sensevoice'
