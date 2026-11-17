@@ -175,7 +175,7 @@ const DAILY: DayPayload = {
     { hour: 9, capturedMinutes: 46, speechMinutes: 32.4, chars: 612, segments: 14 },
     { hour: 10, capturedMinutes: 20, speechMinutes: 14.2, chars: 288, segments: 7 },
   ],
-  selection: { start: 545, end: 582 },
+  selection: { start: 545, end: 582 }, // 默认框住上午第一场，截图里能看到整段转写
   warnings: [],
   inspected: [],
   home: '/Users/demo/.dsh/meeting-memo',
