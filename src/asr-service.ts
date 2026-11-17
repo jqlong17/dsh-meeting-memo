@@ -209,6 +209,7 @@ export class AsrRuntime {
   private generation = 0
   private runningModelId: string | null = null
   private memory: MemorySample[] = []
+  private memorySampleKey = ''
   private memoryTimer: ReturnType<typeof setInterval> | null = null
   /** Last footprint actually measured while an external model was loaded. */
   private loadedFor: string | null = null
@@ -792,7 +793,16 @@ export class AsrRuntime {
       this.loadedFootprint = parts.footprint
     }
     const occupied = applyMeasured(parts, held)
-    this.memory = trimMemory([...this.memory, { at: new Date().toISOString(), ...occupied }])
+    const sample = { at: new Date().toISOString(), ...occupied }
+    this.memory = trimMemory([...this.memory, sample])
+    this.appendMemorySample({
+      at: sample.at,
+      occupied: occupied.occupied,
+      heap: occupied.heap,
+      audio: occupied.audio,
+      fixed: occupied.fixed,
+      mapped: occupied.mapped,
+    })
   }
 
   /** Sample a live loader until it exits. The number is the process footprint, not the file size. */
@@ -836,6 +846,24 @@ export class AsrRuntime {
     setTimeout(() => {
       if (child.exitCode === null) child.kill('SIGKILL')
     }, 12_000).unref?.()
+  }
+
+  /** 每分钟落一条内存样本，供「当天 00:00–24:00」的曲线用。 */
+  private appendMemorySample(sample: { at: string; occupied: number; heap: number; audio: number; fixed: number; mapped: number }): void {
+    const key = sample.at.slice(0, 16) // 分钟粒度
+    if (key === this.memorySampleKey) return
+    this.memorySampleKey = key
+    try {
+      const file = path.join(this.home, 'memory.jsonl')
+      appendFileSync(file, `${JSON.stringify(sample)}\n`, 'utf8')
+      // 只留最近两天，避免文件无限长
+      const lines = readFileSync(file, 'utf8').trim().split('\n')
+      if (lines.length > 3200) {
+        writeFileSync(file, `${lines.slice(-2000).join('\n')}\n`, 'utf8')
+      }
+    } catch {
+      // 写不进去不影响采集
+    }
   }
 
   private watchMemory(): void {

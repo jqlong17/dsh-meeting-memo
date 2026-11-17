@@ -290,6 +290,20 @@ export function Panel(props: PanelProps) {
   })
 
   const [demoMode, setDemoMode] = useState(() => isDemoActive())
+  const [memoryDay, setMemoryDay] = useState<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }[]>([])
+
+  const loadMemoryDay = useCallback(async () => {
+    const result = await rpc<{ day: string; samples: Array<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }> }>('asr.memory', {})
+    if (result.ok) setMemoryDay(result.value.samples)
+  }, [rpc])
+
+  useEffect(() => {
+    if (tab !== 'asr') return
+    void loadMemoryDay()
+    const timer = window.setInterval(() => { void loadMemoryDay() }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [tab, loadMemoryDay])
+
   const [update, setUpdate] = useState<UpdateStatusDTO | null>(null)
   const [updateHidden, setUpdateHidden] = useState(false)
   const [updating, setUpdating] = useState(false)
@@ -1936,7 +1950,7 @@ export function Panel(props: PanelProps) {
           <div style={{ ...smallStyle, marginTop: 0 }}>
             {t('panel.asr.foot')} {asr?.memory?.length ? formatBytes(asr.memory.at(-1)?.occupied ?? asr.memory.at(-1)?.footprint) : (asr?.running ? formatBytes(asr?.rssBytes) : t('panel.asr.rssIdle'))}
           </div>
-          <MemoryTimeline samples={asr?.memory ?? []} t={t} />
+          <MemoryTimeline samples={asr?.memory ?? []} day={memoryDay} t={t} />
           <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.45 }}>{t('panel.asr.memoryHint')}</div>
         </div>
       </div>
@@ -2898,64 +2912,63 @@ function trackColor(track: string): string {
   return 'var(--dsw-alias-chart-messages)'
 }
 
-function MemoryTimeline({ samples, t }: { samples: MemorySampleDTO[]; t: (key: string) => string }) {
-  const latest = samples.at(-1)
-  const first = samples[0]
-  const width = 280
-  const height = 72
-  const used = (sample: MemorySampleDTO): number => sample.occupied ?? sample.footprint
-  const max = Math.max(1, ...samples.map((sample) => used(sample) || 0))
-  const xAt = (index: number): number => samples.length <= 1 ? 0 : (index / (samples.length - 1)) * width
-  const yAt = (value: number): number => height - 4 - ((value / max) * (height - 8))
-  const line = samples.length
-    ? `M${samples.map((sample, index) => `${xAt(index)},${yAt(used(sample))}`).join(' L')}`
+/** 当天 00:00–24:00 的内存曲线；点来自每分钟落盘的样本。 */
+function MemoryTimeline({ samples, day, t }: {
+  samples: MemorySampleDTO[]
+  day: Array<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }>
+  t: (key: string) => string
+}): ReactElement {
+  const latestStatus = samples.at(-1)
+  const latest = day.at(-1)
+  const width = 560
+  const height = 96
+  const used = (point: { occupied: number }): number => point.occupied || 0
+  const values = day.map(used)
+  const max = Math.max(1, ...values)
+  const xAt = (minute: number): number => (Math.min(1440, Math.max(0, minute)) / 1440) * width
+  const yAt = (value: number): number => height - 6 - (value / max) * (height - 14)
+  const line = day.length
+    ? `M${day.map((point) => `${xAt(point.minute).toFixed(1)},${yAt(used(point)).toFixed(1)}`).join(' L')}`
     : ''
-  const area = samples.length
-    ? `${line} L${xAt(samples.length - 1)},${height} L${xAt(0)},${height} Z`
-    : ''
-  const clockOf = (iso?: string): string => iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
-  const delta = latest && first && samples.length > 1 ? used(latest) - used(first) : 0
-  const deltaText = !latest || samples.length < 2
-    ? ''
-    : Math.abs(delta) < 64 * 1024
-      ? t('panel.asr.mem.flat')
-      : `${delta > 0 ? '+' : '−'}${formatBytes(Math.abs(delta), true)}`
-  const parts = [
-    { key: 'audio' as const, color: ACCENT },
-    { key: 'heap' as const, color: 'var(--dsw-alias-chart-messages)' },
-    { key: 'fixed' as const, color: FG2 },
-    { key: 'model' as const, color: 'var(--dsw-alias-label-dimmed)' },
-  ].filter((part) => (latest?.[part.key] ?? 0) > 0)
+  const area = day.length ? `${line} L${xAt(day.at(-1)!.minute).toFixed(1)},${height} L${xAt(day[0].minute).toFixed(1)},${height} Z` : ''
+  const ticks = [0, 360, 720, 1080, 1440]
+  const hours = t('panel.asr.mem.hours')
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
         <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.asr.foot')}</span>
-        <span style={{ fontFamily: MONO, fontSize: FS.num, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>{latest ? formatBytes(used(latest), true) : '—'}</span>
-        <span style={{ ...smallStyle, marginLeft: 'auto' }}>{deltaText}</span>
+        <span style={{ fontFamily: MONO, fontSize: FS.num, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>
+          {latest ? formatBytes(latest.occupied, true) : latestStatus ? formatBytes(latestStatus.occupied ?? latestStatus.footprint, true) : '—'}
+        </span>
+        <span style={{ ...smallStyle, marginLeft: 'auto', color: FG2 }}>{hours}</span>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', ...smallStyle, marginTop: 2 }}>
-        <span>{t('panel.asr.mem.title')}</span>
-        <span>{clockOf(first?.at)} – {clockOf(latest?.at) || t('panel.asr.mem.wait')}</span>
-      </div>
-      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="72" preserveAspectRatio="none" role="img" style={{ display: 'block', marginTop: 4, background: SURFACE_SOFT, borderRadius: RADIUS_CHIP }}>
+      <svg viewBox={`0 0 ${width} ${height + 14}`} width="100%" height={height + 14} role="img" style={{ display: 'block', marginTop: 4, background: SURFACE_SOFT, borderRadius: RADIUS_CHIP }}>
         {area ? <path d={area} fill={ACCENT} opacity={0.1} /> : null}
         {line ? <path d={line} fill="none" stroke={ACCENT} strokeWidth={2} vectorEffect="non-scaling-stroke" /> : null}
+        {ticks.map((minute) => (
+          <text key={minute} x={xAt(minute)} y={height + 11} fontSize={9} fill={CAPTION} textAnchor={minute === 0 ? 'start' : minute === 1440 ? 'end' : 'middle'}>
+            {String(Math.floor(minute / 60)).padStart(2, '0')}:00
+          </text>
+        ))}
       </svg>
-      {latest ? parts.map((part) => (
-        <div key={part.key} style={{ display: 'grid', gridTemplateColumns: '8px 72px 72px', columnGap: 8, alignItems: 'center', marginTop: 4, fontSize: FS.xs }}>
-          <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: part.color }} />
-          <span>{t(`panel.asr.mem.${part.key}`)}</span>
-          <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest[part.key] ?? 0, true)}</span>
-        </div>
-      )) : <div style={{ ...smallStyle, marginTop: 4 }}>{t('panel.asr.mem.wait')}</div>}
-      {latest && (latest.mapped ?? 0) > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '8px 72px 72px', columnGap: 8, alignItems: 'center', marginTop: 4, fontSize: FS.xs, opacity: 0.7 }}>
+      {latest ? (
+        <div style={{ display: 'grid', gridTemplateColumns: '8px 72px 72px', columnGap: 8, alignItems: 'center', marginTop: 4, fontSize: FS.xs }}>
+          <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: 'var(--dsw-alias-chart-audio)' }} />
+          <span>{t('panel.asr.mem.audio')}</span>
+          <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest.audio, true)}</span>
+          <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: 'var(--dsw-alias-chart-messages)' }} />
+          <span>{t('panel.asr.mem.heap')}</span>
+          <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest.heap, true)}</span>
+          <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: FG2 }} />
+          <span>{t('panel.asr.mem.fixed')}</span>
+          <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest.fixed, true)}</span>
           <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: BORDER }} />
           <span>{t('panel.asr.mem.mapped')}</span>
-          <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest.mapped, true)}</span>
+          <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: 0.7 }}>{formatBytes(latest.mapped, true)}</span>
         </div>
-      ) : null}
-
+      ) : (
+        <div style={{ ...smallStyle, marginTop: 4 }}>{t('panel.asr.mem.wait')}</div>
+      )}
     </div>
   )
 }

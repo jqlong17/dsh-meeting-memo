@@ -233,6 +233,52 @@ async function dispatch(
       await runtime.start()
       return runtime.status()
     }
+    case 'asr.memory': {
+      // 当天 00:00–24:00 的内存曲线；按 5 分钟均值降采样，最多 288 个点
+      const day = typeof payload.day === 'string' && payload.day
+        ? payload.day
+        : dayKey(service.config.timeZone)
+      const file = path.join(service.config.home, 'memory.jsonl')
+      let rows: Array<{ at: string; occupied: number; heap: number; audio: number; fixed: number; mapped: number }> = []
+      try {
+        rows = readFileSync(file, 'utf8').trim().split('\n').flatMap((line) => {
+          if (!line.trim()) return []
+          try {
+            const row = JSON.parse(line) as { at?: string }
+            if (!row.at || !row.at.startsWith(day)) return []
+            return [row as { at: string; occupied: number; heap: number; audio: number; fixed: number; mapped: number }]
+          } catch {
+            return []
+          }
+        })
+      } catch {
+        rows = []
+      }
+      const buckets = new Map<number, { sum: number; count: number; heap: number; audio: number; fixed: number; mapped: number }>()
+      for (const row of rows) {
+        const at = new Date(row.at)
+        const minute = at.getHours() * 60 + at.getMinutes()
+        const slot = Math.floor(minute / 5) * 5
+        const bucket = buckets.get(slot) ?? { sum: 0, count: 0, heap: 0, audio: 0, fixed: 0, mapped: 0 }
+        bucket.sum += row.occupied || 0
+        bucket.count += 1
+        bucket.heap += row.heap || 0
+        bucket.audio += row.audio || 0
+        bucket.fixed += row.fixed || 0
+        bucket.mapped += row.mapped || 0
+        buckets.set(slot, bucket)
+      }
+      const samples = [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([minute, bucket]) => ({
+        minute,
+        at: `${day}T${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}:00`,
+        occupied: Math.round(bucket.sum / bucket.count),
+        heap: Math.round(bucket.heap / bucket.count),
+        audio: Math.round(bucket.audio / bucket.count),
+        fixed: Math.round(bucket.fixed / bucket.count),
+        mapped: Math.round(bucket.mapped / bucket.count),
+      }))
+      return { day, samples }
+    }
     case 'asr.status':
       return requireAsr(asr).runtime.status()
     case 'asr.set': {

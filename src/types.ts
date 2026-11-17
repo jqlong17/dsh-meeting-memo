@@ -133,6 +133,22 @@ export interface AsrModelsPayload {
   suggestion: { ok: boolean; kind: string; path: string; name: string; missing: string[] } | null
 }
 
+export interface DayMemorySampleDTO {
+  /** 当天第几分钟（5 分钟对齐）。 */
+  minute: number
+  at: string
+  occupied: number
+  heap: number
+  audio: number
+  fixed: number
+  mapped: number
+}
+
+export interface DayMemoryDTO {
+  day: string
+  samples: DayMemorySampleDTO[]
+}
+
 export interface MemorySampleDTO {
   at: string
   rss: number

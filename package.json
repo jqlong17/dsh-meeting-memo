@@ -1,6 +1,6 @@
 {
   "name": "dsh-meeting-memo",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Meeting minutes in the right sidebar: local capture, transcription, and structured minutes.",
   "type": "module",
   "main": "./lib/index.js",
