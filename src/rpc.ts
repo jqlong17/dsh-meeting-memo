@@ -744,6 +744,8 @@ function snippetFlags(home: string, day: string): Map<number, { emb: boolean; au
   }
   try {
     const text = readFileSync(path.join(home, 'asr-log', day, 'snippets.jsonl'), 'utf8')
+    // 声纹可能已经搬到 emb.jsonl，两处都要认
+    const sidecar = readEmbMap(path.join(home, 'asr-log', day))
     let index = 0
     for (const raw of text.split('\n')) {
       if (!raw.trim()) continue
@@ -751,7 +753,9 @@ function snippetFlags(home: string, day: string): Map<number, { emb: boolean; au
       try {
         const row = JSON.parse(raw) as { emb?: unknown; audio?: unknown }
         flags.set(index, {
-          emb: (typeof row.emb === 'string' && row.emb.length > 0) || Boolean(cache[`${day}:${index}`]),
+          emb: (typeof row.emb === 'string' && row.emb.length > 0)
+            || sidecar.has(index)
+            || Boolean(cache[`${day}:${index}`]),
           audio: typeof row.audio === 'string' && row.audio.length > 0,
         })
       } catch {
