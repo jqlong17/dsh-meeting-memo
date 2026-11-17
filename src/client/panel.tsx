@@ -196,6 +196,21 @@ function lastDataMinute(data: DayPayload): number {
   return Math.max(bucket, segment)
 }
 
+const TAB_KEY = 'dsh-mm-tab'
+type PanelTab = 'today' | 'minutes' | 'background' | 'jobs' | 'asr' | 'speaker' | 'about'
+const TABS: PanelTab[] = ['today', 'minutes', 'background', 'jobs', 'asr', 'speaker', 'about']
+
+/** 插件重载会让面板重建，把上次停留的标签页读回来，避免每次都跳回「今日」。 */
+function readTab(): PanelTab {
+  try {
+    const saved = window.localStorage.getItem(TAB_KEY)
+    if (saved && (TABS as string[]).includes(saved)) return saved as PanelTab
+  } catch {
+    // 隐私模式下读不到就用默认
+  }
+  return 'today'
+}
+
 export interface PanelProps {
   rpc: RpcCall
   t: (key: string) => string
@@ -226,7 +241,7 @@ function sourceLabel(source: MinuteSessionDTO['source'], t: (key: string) => str
 
 export function Panel(props: PanelProps) {
   const { rpc, t } = props
-  const [tab, setTab] = useState<'today' | 'minutes' | 'background' | 'jobs' | 'asr' | 'speaker' | 'about'>('today')
+  const [tab, setTab] = useState<PanelTab>(() => readTab())
   const [data, setData] = useState<DayPayload | null>(null)
   const [dataError, setDataError] = useState<RpcError | null>(null)
   const [loading, setLoading] = useState(false)
@@ -288,6 +303,14 @@ export function Panel(props: PanelProps) {
     }
     return 150
   })
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TAB_KEY, tab)
+    } catch {
+      // 存不下来就只在本次会话生效
+    }
+  }, [tab])
 
   const [demoMode, setDemoMode] = useState(() => isDemoActive())
   const [memoryDay, setMemoryDay] = useState<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }[]>([])
