@@ -314,6 +314,32 @@ export function Panel(props: PanelProps) {
 
   const [demoMode, setDemoMode] = useState(() => isDemoActive())
   const [memoryDay, setMemoryDay] = useState<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }[]>([])
+  const [storage, setStorage] = useState<{ audio: { files: number; bytes: number; days: Array<{ day: string; files: number; bytes: number }> }; backups: { files: number; bytes: number } } | null>(null)
+  const [cleaning, setCleaning] = useState(false)
+
+  const loadStorage = useCallback(async () => {
+    const result = await rpc<{ audio: { files: number; bytes: number; days: Array<{ day: string; files: number; bytes: number }> }; backups: { files: number; bytes: number } }>('asr.storage', {})
+    if (result.ok) setStorage(result.value)
+  }, [rpc])
+
+  const cleanAudio = async (olderThanDays: number) => {
+    setCleaning(true)
+    setNoticeError('')
+    try {
+      const result = await rpc<{ removed: number; freed: number }>('asr.cleanup', { olderThanDays })
+      if (!result.ok) {
+        setNoticeError(result.error.message)
+        return
+      }
+      setNotice(t('panel.asr.storage.cleaned')
+        .replace('{n}', String(result.value.removed))
+        .replace('{s}', formatBytes(result.value.freed, true)))
+      await loadStorage()
+    } finally {
+      setCleaning(false)
+    }
+  }
+
   const [hbRange, setHbRange] = useState<'minute' | 'hour' | 'day'>('minute')
   const [hbDay, setHbDay] = useState<{ points: Array<{ minute: number; state: 'ok' | 'idle' | 'gap'; speech: number; snippets: number }>; summary: { total: number; ok: number; idle: number; gap: number } } | null>(null)
 
@@ -324,6 +350,7 @@ export function Panel(props: PanelProps) {
 
   useEffect(() => {
     if (tab !== 'asr') return
+    void loadStorage()
     void loadHeartbeatDay(hbRange)
     const timer = window.setInterval(() => { void loadHeartbeatDay(hbRange) }, 60_000)
     return () => window.clearInterval(timer)
@@ -1993,6 +2020,40 @@ export function Panel(props: PanelProps) {
               </span>
             </label>
           ))}
+
+          {/* 原音占用与清理：放在「保存内容」里，离配置最近 */}
+          {storage ? (
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${BORDER}` }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', fontSize: FS.xs }}>
+                <span style={{ fontWeight: 600 }}>{t('panel.asr.storage.audio')}</span>
+                <span style={{ fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
+                  {formatBytes(storage.audio.bytes, true)} · {storage.audio.files} {t('panel.asr.storage.files')}
+                </span>
+                {storage.audio.days.length ? (
+                  <span style={{ color: CAPTION }}>
+                    {t('panel.asr.storage.oldest').replace('{d}', storage.audio.days[0].day)}
+                  </span>
+                ) : (
+                  <span style={{ color: CAPTION }}>{t('panel.asr.storage.empty')}</span>
+                )}
+                <span style={{ flex: '1 1 auto' }} />
+                <button type="button" style={buttonStyle} disabled={cleaning || !storage.audio.files} onClick={() => void cleanAudio(7)}>
+                  {t('panel.asr.storage.clean7')}
+                </button>
+                <button type="button" style={buttonStyle} disabled={cleaning || !storage.audio.files} onClick={() => void cleanAudio(0)}>
+                  {t('panel.asr.storage.cleanAll')}
+                </button>
+              </div>
+              {storage.backups.files ? (
+                <div style={{ ...smallStyle, marginTop: 4 }}>
+                  {t('panel.asr.storage.backup')
+                    .replace('{n}', String(storage.backups.files))
+                    .replace('{s}', formatBytes(storage.backups.bytes, true))}
+                </div>
+              ) : null}
+              <div style={{ ...smallStyle, marginTop: 4, lineHeight: 1.45 }}>{t('panel.asr.storage.hint')}</div>
+            </div>
+          ) : null}
         </div>
 
         <div style={{ ...cardStyle, marginTop: 8 }}>

@@ -13,6 +13,7 @@
  */
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { readDayMap } from './speaker-assignments.ts'
 import type { Context } from '@deepseek-ai/cordis'
 
 import type { MeetingService } from './service.ts'
@@ -27,17 +28,9 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{32}$/
 /** 打包后 __dirname 是 lib/，资源在 ../resources/mobile/。 */
 const ASSET_DIR = new URL('../resources/mobile/', import.meta.url)
 
-/** 读当天的说话人分配（缺失时返回空）。 */
+/** 读当天的说话人分配（缺失时返回空）；数据源已改成按天文件。 */
 function readAssignments(home: string, day: string): Record<string, { speaker: string; name?: string }> {
-  try {
-    const file = new URL(`file://${home}/speaker-assignments.json`)
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as {
-      days?: Record<string, Record<string, { speaker: string; name?: string }>>
-    }
-    return parsed.days?.[day] ?? {}
-  } catch {
-    return {}
-  }
+  return readDayMap(home, day)
 }
 
 function asset(name: string): string {

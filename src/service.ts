@@ -13,7 +13,7 @@ import type { MeetingConfig } from './config.ts'
 import { listSources, readSelectedRoot, writeSelectedRoot } from './source.ts'
 import { asrLogRoot } from './asr-log.ts'
 import { buildIndexCopy } from './copy-index.ts'
-import { readAssignments } from './speaker-assignments.ts'
+import { readDayAssignments } from './speaker-assignments.ts'
 import { readLabels } from './speaker-labels.ts'
 import { dayStats, formatClock, hourlySummary, nowMinuteOfDay, parseClock, readDay, sliceRange, todayKey } from './lifelog.ts'
 import type { DayData } from './lifelog.ts'
@@ -725,8 +725,8 @@ export class MeetingService {
     let score = segment.speakerScore
     if (day && line) {
       if (!this.speakerCache || this.speakerCache.day !== day) {
-        const days = readAssignments(this.config.home)
-        this.speakerCache = { day, map: days[day] ?? {}, authoritative: Boolean(days[day]) }
+        const map = readDayAssignments(this.config.home, day)
+        this.speakerCache = { day, map: map ?? {}, authoritative: map !== null }
       }
       const entry = this.speakerCache.map[String(line)]
       if (entry?.name) {

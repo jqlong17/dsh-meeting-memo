@@ -11,7 +11,7 @@
  *   minutes.clear  -> remove the whole day's minutes file
  *   backgrounds.*  -> list/upsert/delete background cards and their selection
  */
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
@@ -24,7 +24,8 @@ import { defaultDownloadRoot, offerMatches, offersForPlatform } from './model-ca
 import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
 import { addLabel, deleteLabel, groupByDay, readLabels } from './speaker-labels.ts'
-import { readAssignments, writeAssignments } from './speaker-assignments.ts'
+import { readDayMap, listDays, writeDay } from './speaker-assignments.ts'
+import { readEmbMap } from './emb-store.ts'
 import { backfillLabel } from './speaker-backfill.ts'
 import { buildCentroids, decodeEmbedding } from './speaker-live.ts'
 import { centroidKey, neededScopes, parseRows, rebuildAssignments } from './speaker-rebuild.ts'
@@ -290,6 +291,120 @@ async function dispatch(
       }
       return { day, range, start, end, points, summary: { total: points.length, ok, idle, gap } }
     }
+    case 'asr.storage': {
+      // 原音与备份的占用情况：面板「保存内容」那里显示，并提供清理入口
+      const logRoot = path.join(service.config.home, 'asr-log')
+      const days: Array<{ day: string; files: number; bytes: number }> = []
+      let backupBytes = 0
+      let backupFiles = 0
+      try {
+        for (const name of readdirSync(logRoot)) {
+          const dir = path.join(logRoot, name)
+          if (!statSync(dir).isDirectory()) continue
+          const audioDir = path.join(dir, 'audio')
+          let files = 0
+          let bytes = 0
+          const walk = (target: string): void => {
+            let entries: string[] = []
+            try {
+              entries = readdirSync(target)
+            } catch {
+              return
+            }
+            for (const entry of entries) {
+              const full = path.join(target, entry)
+              try {
+                const stat = statSync(full)
+                if (stat.isDirectory()) walk(full)
+                else if (entry.endsWith('.wav')) {
+                  files += 1
+                  bytes += stat.size
+                }
+              } catch {
+                // 读不到就跳过
+              }
+            }
+          }
+          walk(audioDir)
+          if (files) days.push({ day: name, files, bytes })
+          // 迁移留的 .premigrate 备份也算进来，别让用户不知道占了多少
+          try {
+            for (const entry of readdirSync(dir)) {
+              if (!entry.endsWith('.premigrate')) continue
+              backupFiles += 1
+              backupBytes += statSync(path.join(dir, entry)).size
+            }
+          } catch {
+            // 忽略
+          }
+        }
+      } catch {
+        // 没有日志目录
+      }
+      days.sort((a, b) => a.day.localeCompare(b.day))
+      const audioBytes = days.reduce((sum, item) => sum + item.bytes, 0)
+      const audioFiles = days.reduce((sum, item) => sum + item.files, 0)
+      const home = service.config.home
+      try {
+        for (const entry of readdirSync(home)) {
+          if (!entry.endsWith('.premigrate')) continue
+          backupFiles += 1
+          backupBytes += statSync(path.join(home, entry)).size
+        }
+      } catch {
+        // 忽略
+      }
+      return {
+        audio: { files: audioFiles, bytes: audioBytes, days },
+        backups: { files: backupFiles, bytes: backupBytes },
+        retentionDays: 7,
+      }
+    }
+    case 'asr.cleanup': {
+      // 清理原音：olderThanDays=0 表示全部清掉；不传默认 7 天
+      const raw = Number(payload.olderThanDays)
+      const days = Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 7
+      const today = dayKey(service.config.timeZone)
+      const cutoff = days === 0 ? '9999-99-99' : dayKey(service.config.timeZone, new Date(Date.now() - days * 86_400_000))
+      const targets: string[] = []
+      const logRoot = path.join(service.config.home, 'asr-log')
+      try {
+        for (const name of readdirSync(logRoot)) {
+          if (name >= today) continue
+          if (days !== 0 && name >= cutoff) continue
+          const walk = (target: string): void => {
+            let entries: string[] = []
+            try {
+              entries = readdirSync(target)
+            } catch {
+              return
+            }
+            for (const entry of entries) {
+              const full = path.join(target, entry)
+              const stat = statSync(full)
+              if (stat.isDirectory()) walk(full)
+              else if (entry.endsWith('.wav')) targets.push(full)
+            }
+          }
+          walk(path.join(logRoot, name, 'audio'))
+        }
+      } catch {
+        // 没有目录就没什么可清
+      }
+      let removed = 0
+      let freed = 0
+      for (const file of targets) {
+        try {
+          const size = statSync(file).size
+          unlinkSync(file)
+          removed += 1
+          freed += size
+        } catch {
+          // 删不掉就算了，不阻断
+        }
+      }
+      return { removed, freed, olderThanDays: days }
+    }
     case 'asr.memory': {
       // 当天 00:00–24:00 的内存曲线；按 5 分钟均值降采样，最多 288 个点
       const day = typeof payload.day === 'string' && payload.day
@@ -360,9 +475,10 @@ async function dispatch(
       throw new MeetingError('BAD_ASR', '缺少 enabled 或 mode')
     }
     case 'speaker.assignments': {
-      const days = readAssignments(service.config.home)
       const wanted = typeof payload.day === 'string' && payload.day ? payload.day : undefined
-      return wanted ? { day: wanted, map: days[wanted] ?? {} } : { days }
+      if (wanted) return { day: wanted, map: readDayMap(service.config.home, wanted) }
+      const days = Object.fromEntries(listDays(service.config.home).map((day) => [day, readDayMap(service.config.home, day)]))
+      return { days }
     }
     case 'speaker.rebuild': {
       const day = service.dayPayload(typeof payload.day === 'string' && payload.day ? payload.day : undefined).day
@@ -374,6 +490,14 @@ async function dispatch(
         throw new MeetingError('NO_LOG', '当天还没有转写')
       }
       const rows = parseRows(text)
+      // 声纹存在 emb.jsonl，按行号合回来（老文件里仍可能是内联的）
+      const embMap = readEmbMap(path.join(service.config.home, 'asr-log', day))
+      for (const row of rows) {
+        if (!row.emb) {
+          const stored = embMap.get(row.line)
+          if (stored) row.emb = stored
+        }
+      }
       const labels = readLabels(service.config.home)
       if (!labels.length) {
         throw new MeetingError('NO_LABELS', '还没有登记任何说话人', '先去「说话人识别 → 打标」登记几句，再回来重算')
@@ -396,16 +520,14 @@ async function dispatch(
         decode: decodeEmbedding,
       })
       // 旧归属整体替换：没声纹的行保留原值，其余以本次判定为准
-      const days = readAssignments(service.config.home)
-      const previous = days[day] ?? {}
+      const previous = readDayMap(service.config.home, day)
       const next: typeof previous = {}
       const evaluated = new Set(rows.filter((row) => row.emb).map((row) => String(row.line)))
       for (const [line, entry] of Object.entries(previous)) {
         if (!evaluated.has(line)) next[line] = entry
       }
       for (const [line, entry] of Object.entries(result.map)) next[line] = entry
-      days[day] = next
-      writeAssignments(service.config.home, days)
+      writeDay(service.config.home, day, next)
       service.invalidateSpeakerCache()
       return {
         day,
@@ -449,9 +571,8 @@ async function dispatch(
           map[String(line)] = { speaker, track: result.track, source: 'batch', ...(name ? { name } : {}) }
         }
       }
-      const days = readAssignments(service.config.home)
-      days[day.day] = map
-      writeAssignments(service.config.home, days)
+      writeDay(service.config.home, day.day, map)
+      service.invalidateSpeakerCache()
       const speakers = [...new Set(results.flatMap((result) => result.speakers))]
       return {
         day: day.day,
@@ -500,13 +621,18 @@ async function dispatch(
         throw new MeetingError('NO_LOG', '当天还没有转写')
       }
       const rows: Array<{ line: number; startAt: string; endAt: string; track: string; text: string; emb?: string }> = []
+      const embMap = readEmbMap(path.join(service.config.home, 'asr-log', day))
       let index = 0
       for (const text of raw.split('\n')) {
         if (!text.trim()) continue
         index += 1
         try {
           const row = JSON.parse(text) as Record<string, unknown>
-          if (typeof row.emb !== 'string' || !row.emb) continue
+          if (typeof row.emb !== 'string' || !row.emb) {
+            const stored = embMap.get(index)
+            if (stored) row.emb = stored
+            else continue
+          }
           // 只挑麦克风轨：system 轨是别人在说话，混进来会把质心带偏
           if (typeof row.input !== 'string' || !row.input) continue
           const body = String(row.text ?? '').trim()

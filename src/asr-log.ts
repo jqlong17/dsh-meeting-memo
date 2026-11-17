@@ -2,6 +2,7 @@
  * Plugin-owned life log. Same day-folder contract as notta-input
  * (`activity.jsonl` + `snippets.jsonl`) so the Today view can point here.
  */
+import { countSnippetLines, appendEmb } from './emb-store.ts'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 
@@ -47,6 +48,26 @@ export interface AsrSnippetInput {
   speakerScore?: number
 }
 
+
+/** 当天正文行数缓存：新写入的声纹要按行号对齐，不能每句都数一遍文件。 */
+const lineCounts = new Map<string, number>()
+
+function nextLineNumber(file: string): number {
+  const cached = lineCounts.get(file)
+  if (typeof cached === 'number') {
+    lineCounts.set(file, cached + 1)
+    return cached + 1
+  }
+  const count = countSnippetLines(file)
+  lineCounts.set(file, count + 1)
+  return count + 1
+}
+
+/** 供重算等场景重置计数（外部改写过文件时）。 */
+export function resetLineCount(file: string): void {
+  lineCounts.delete(file)
+}
+
 export function appendSnippet(root: string, input: AsrSnippetInput): void {
   const dir = dayDir(root, input.day)
   const row = {
@@ -58,13 +79,16 @@ export function appendSnippet(root: string, input: AsrSnippetInput): void {
     text: input.text,
     source: 'asr',
     ...(input.audio ? { audio: input.audio } : {}),
-    ...(input.emb ? { emb: input.emb } : {}),
     ...(input.split ? { split: true } : {}),
     ...(input.input ? { input: input.input } : {}),
     ...(input.speaker ? { speaker: input.speaker } : {}),
     ...(typeof input.speakerScore === 'number' ? { speakerScore: input.speakerScore } : {}),
   }
-  appendFileSync(path.join(dir, 'snippets.jsonl'), `${JSON.stringify(row)}\n`, 'utf8')
+  const file = path.join(dir, 'snippets.jsonl')
+  // 声纹单独存：正文保持可读，行号与这里对齐
+  const line = nextLineNumber(file)
+  appendFileSync(file, `${JSON.stringify(row)}\n`, 'utf8')
+  if (input.emb) appendEmb(dir, line, input.emb)
 }
 
 export interface AsrActivityInput {

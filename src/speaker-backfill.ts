@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
 import { asrLogRoot } from './asr-log.ts'
-import { readAssignments, writeAssignments, type Assignment, type AssignmentDays } from './speaker-assignments.ts'
+import { readDayMap, writeDay, type Assignment } from './speaker-assignments.ts'
 import type { SpeakerLabel } from './speaker-labels.ts'
 
 /** 把 ISO 时间换算成「当天第几分钟」，按配置时区。 */
@@ -65,8 +65,7 @@ export function backfillLabel(home: string, timeZone: string, label: SpeakerLabe
   const rows = readSnippetRows(home, label.day)
   if (!rows.length) return 0
   const picked = new Set(label.lines ?? [])
-  const days: AssignmentDays = readAssignments(home)
-  const bucket = days[label.day] ?? {}
+  const bucket = readDayMap(home, label.day)
   let touched = 0
   for (const row of rows) {
     let hit = false
@@ -87,9 +86,6 @@ export function backfillLabel(home: string, timeZone: string, label: SpeakerLabe
     bucket[String(row.line)] = entry
     touched += 1
   }
-  if (touched) {
-    days[label.day] = bucket
-    writeAssignments(home, days)
-  }
+  if (touched) writeDay(home, label.day, bucket)
   return touched
 }
