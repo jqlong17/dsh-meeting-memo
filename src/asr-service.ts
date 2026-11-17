@@ -850,7 +850,9 @@ export class AsrRuntime {
 
   /** 每分钟落一条内存样本，供「当天 00:00–24:00」的曲线用。 */
   private appendMemorySample(sample: { at: string; occupied: number; heap: number; audio: number; fixed: number; mapped: number }): void {
-    const key = sample.at.slice(0, 16) // 分钟粒度
+    // 30 秒一条：最近 5 分钟的图才有 10 个点，而不是 5 个
+    const seconds = sample.at.slice(17, 19)
+    const key = `${sample.at.slice(0, 16)}:${Number(seconds) < 30 ? '0' : '3'}`
     if (key === this.memorySampleKey) return
     this.memorySampleKey = key
     try {
@@ -858,8 +860,8 @@ export class AsrRuntime {
       appendFileSync(file, `${JSON.stringify(sample)}\n`, 'utf8')
       // 只留最近两天，避免文件无限长
       const lines = readFileSync(file, 'utf8').trim().split('\n')
-      if (lines.length > 3200) {
-        writeFileSync(file, `${lines.slice(-2000).join('\n')}\n`, 'utf8')
+      if (lines.length > 6000) {
+        writeFileSync(file, `${lines.slice(-4000).join('\n')}\n`, 'utf8')
       }
     } catch {
       // 写不进去不影响采集

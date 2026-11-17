@@ -291,9 +291,9 @@ export function Panel(props: PanelProps) {
 
   const [demoMode, setDemoMode] = useState(() => isDemoActive())
   const [memoryDay, setMemoryDay] = useState<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }[]>([])
-  const [memoryRange, setMemoryRange] = useState<'hour' | 'day'>('hour')
+  const [memoryRange, setMemoryRange] = useState<'minute' | 'hour' | 'day'>('minute')
 
-  const loadMemoryDay = useCallback(async (range: 'hour' | 'day') => {
+  const loadMemoryDay = useCallback(async (range: 'minute' | 'hour' | 'day') => {
     const result = await rpc<{ day: string; samples: Array<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }> }>('asr.memory', { range })
     if (result.ok) setMemoryDay(result.value.samples)
   }, [rpc])
@@ -2927,8 +2927,8 @@ function trackColor(track: string): string {
 function MemoryTimeline({ samples, day, range, onRange, t }: {
   samples: MemorySampleDTO[]
   day: Array<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }>
-  range: 'hour' | 'day'
-  onRange: (next: 'hour' | 'day') => void
+  range: 'minute' | 'hour' | 'day'
+  onRange: (next: 'minute' | 'hour' | 'day') => void
   t: (key: string) => string
 }): ReactElement {
   // 最近 1 小时：横轴是「过去 60 分钟」；全天：00:00–24:00
@@ -2936,8 +2936,9 @@ function MemoryTimeline({ samples, day, range, onRange, t }: {
     const now = new Date()
     return now.getHours() * 60 + now.getMinutes()
   })()
-  const baseStart = range === 'hour' ? Math.max(0, nowMinute - 60) : 0
-  const baseEnd = range === 'hour' ? Math.max(60, nowMinute) : 1440
+  const baseSpan = range === 'minute' ? 5 : range === 'hour' ? 60 : 1440
+  const baseStart = range === 'day' ? 0 : Math.max(0, nowMinute - baseSpan)
+  const baseEnd = range === 'day' ? 1440 : Math.max(baseSpan, nowMinute)
   // 用户拖出来的窗口；空表示跟着「最近 1 小时 / 全天」走
   const [zoom, setZoom] = useState<{ start: number; end: number } | null>(null)
   const [dragging, setDragging] = useState<{ anchor: number; current: number } | null>(null)
@@ -2976,9 +2977,11 @@ function MemoryTimeline({ samples, day, range, onRange, t }: {
     return out
   })()
 
-  const ticks = range === 'hour'
-    ? [0, 15, 30, 45, 60].map((offset) => Math.round(windowStart + offset))
-    : [0, 360, 720, 1080, 1440]
+  const ticks = range === 'minute'
+    ? [0, 1, 2, 3, 4, 5].map((offset) => Math.round(windowStart + offset))
+    : range === 'hour'
+      ? [0, 15, 30, 45, 60].map((offset) => Math.round(windowStart + offset))
+      : [0, 360, 720, 1080, 1440]
   const totalLabel = latest
     ? formatBytes(stacks.reduce((sum, part) => sum + (latest[part.key] || 0), 0), true)
     : latestStatus ? formatBytes(latestStatus.occupied ?? latestStatus.footprint, true) : '—'
@@ -2989,7 +2992,7 @@ function MemoryTimeline({ samples, day, range, onRange, t }: {
         <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.asr.foot')}</span>
         <span style={{ fontFamily: MONO, fontSize: FS.num, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>{totalLabel}</span>
         <span style={{ flex: '1 1 auto' }} />
-        {(['hour', 'day'] as const).map((mode) => (
+        {(['minute', 'hour', 'day'] as const).map((mode) => (
           <button
             key={mode}
             type="button"
@@ -3056,7 +3059,7 @@ function MemoryTimeline({ samples, day, range, onRange, t }: {
         ) : null}
         {ticks.map((minute) => (
           <text key={minute} x={xAt(minute)} y={height + 11} fontSize={9} fill={CAPTION} textAnchor={minute === 0 ? 'start' : minute === 1440 ? 'end' : 'middle'}>
-            {String(Math.floor(minute / 60)).padStart(2, '0')}:00
+            {`${String(Math.floor(minute / 60)).padStart(2, '0')}:${range === 'minute' ? String(Math.round(minute % 60)).padStart(2, '0') : '00'}`}
           </text>
         ))}
       </svg>

@@ -254,9 +254,10 @@ async function dispatch(
       } catch {
         rows = []
       }
-      // 最近 1 小时用 1 分钟粒度（60 点），全天用 5 分钟粒度（288 点）
-      const range = payload.range === 'hour' ? 'hour' : 'day'
-      const bucketMinutes = range === 'hour' ? 1 : 5
+      // 最近 5 分钟用 30 秒粒度（10 点）；最近 1 小时用 1 分钟（60 点）；全天 5 分钟（288 点）
+      const range = payload.range === 'minute' ? 'minute' : payload.range === 'hour' ? 'hour' : 'day'
+      const bucketMinutes = range === 'minute' ? 0.5 : range === 'hour' ? 1 : 5
+      const spanMinutes = range === 'minute' ? 5 : range === 'hour' ? 60 : 1440
       const nowMinute = (() => {
         const now = new Date()
         return now.getHours() * 60 + now.getMinutes()
@@ -265,8 +266,8 @@ async function dispatch(
       for (const row of rows) {
         const at = new Date(row.at)
         const minute = at.getHours() * 60 + at.getMinutes()
-        if (range === 'hour' && minute < nowMinute - 60) continue
-        const slot = Math.floor(minute / bucketMinutes) * bucketMinutes
+        if (range !== 'day' && minute < nowMinute - spanMinutes) continue
+        const slot = Math.round(Math.floor(minute / bucketMinutes) * bucketMinutes * 100) / 100
         const bucket = buckets.get(slot) ?? { sum: 0, count: 0, heap: 0, audio: 0, fixed: 0, mapped: 0 }
         bucket.sum += row.occupied || 0
         bucket.count += 1
