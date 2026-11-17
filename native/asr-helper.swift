@@ -462,6 +462,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// 当前实际在用的输入设备 id：用来发现「耳机被拔了 / 默认设备换了」
     var currentInputID: AudioDeviceID = 0
     var deviceWatch: DispatchSourceTimer?
+    /// 最后一次收到麦克风样本的时间：引擎「看着在跑但一个样本都没有」时用来判定假死
+    var lastMicBufferAt = Date()
 
     init(model: SenseVoice?, mode: String, language: String, audioRoot: String?, inputUID: String?, embedModel: String?) {
         self.embedder = embedModel.flatMap { SpeakerEmbedder(model: $0) }
@@ -526,6 +528,13 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         timer.schedule(deadline: .now() + 5, repeating: 5)
         timer.setEventHandler { [weak self] in
             guard let self, self.engine != nil else { return }
+            // 引擎在跑却 10 秒没有任何样本：多半是拔插耳机或设备切换后触点停了
+            if self.engine != nil, Date().timeIntervalSince(self.lastMicBufferAt) > 10 {
+                emit(["type": "warn", "track": "mic", "message": "麦克风没有样本回流，正在重建采集"])
+                self.restartMic()
+                self.lastMicBufferAt = Date()
+                return
+            }
             let devices = inputDevices()
             let wanted = self.inputUID.flatMap { uid in devices.first { $0.uid == uid }?.id } ?? defaultInputID() ?? 0
             guard wanted != self.currentInputID else { return }
@@ -707,6 +716,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
             if peak > systemPeak { systemPeak = peak }
         } else {
             micBuffers += 1
+            lastMicBufferAt = now
             if peak > micPeak { micPeak = peak }
         }
         let utterance = track == "system" ? system : mic
