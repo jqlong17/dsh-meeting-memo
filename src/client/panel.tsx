@@ -1523,17 +1523,17 @@ export function Panel(props: PanelProps) {
         </div>
 
         <div style={{ flex: '0 0 auto', padding: '0 10px 6px', display: 'flex', gap: 6, alignItems: 'center', borderBottom: `1px solid ${BORDER}` }}>
-          <button type="button" style={chipStyle(spkView === 'tag')} onClick={() => setSpkView('tag')}>{t('panel.speaker.viewTag')}</button>
-          <button type="button" style={chipStyle(spkView === 'saved')} onClick={() => setSpkView('saved')}>
-            {t('panel.speaker.viewSaved')} {speaker?.total ? ` ${speaker.total}` : ''}
-          </button>
-          <span style={{ flex: '1 1 auto' }} />
-          {/* 按轨道过滤：麦克风是本机说话，系统是会议里其他人的声音 */}
+          {/* 轨道筛选放最左，和「今日」页的位置一致 */}
           {(['all', 'mic', 'system'] as const).map((key) => (
             <button key={key} type="button" style={chipStyle(spkTrack === key)} onClick={() => setSpkTrack(key)}>
               {t(`panel.speaker.trackFilter.${key}`)}
             </button>
           ))}
+          <span style={{ width: 8 }} />
+          <button type="button" style={chipStyle(spkView === 'tag')} onClick={() => setSpkView('tag')}>{t('panel.speaker.viewTag')}</button>
+          <button type="button" style={chipStyle(spkView === 'saved')} onClick={() => setSpkView('saved')}>
+            {t('panel.speaker.viewSaved')} {speaker?.total ? ` ${speaker.total}` : ''}
+          </button>
         </div>
 
         {spkView === 'tag' ? (
