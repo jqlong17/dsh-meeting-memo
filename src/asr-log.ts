@@ -37,6 +37,8 @@ export interface AsrSnippetInput {
   audio?: string
   /** float16 + base64 的声纹向量，用于实时说话人匹配。 */
   emb?: string
+  /** 这句是不是「按声纹切开」切出来的前半截。 */
+  split?: boolean
   /** 麦克风设备名：声纹跨设备会明显掉分，所以按设备分开登记。 */
   input?: string
   /** 写入当时判定的说话人（快照；权威值仍在 speaker-assignments.json）。 */
@@ -57,6 +59,7 @@ export function appendSnippet(root: string, input: AsrSnippetInput): void {
     source: 'asr',
     ...(input.audio ? { audio: input.audio } : {}),
     ...(input.emb ? { emb: input.emb } : {}),
+    ...(input.split ? { split: true } : {}),
     ...(input.input ? { input: input.input } : {}),
     ...(input.speaker ? { speaker: input.speaker } : {}),
     ...(typeof input.speakerScore === 'number' ? { speakerScore: input.speakerScore } : {}),

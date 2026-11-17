@@ -600,6 +600,7 @@ export class AsrRuntime {
         text,
         ...(typeof event.audio === 'string' ? { audio: event.audio } : {}),
         ...(emb ? { emb } : {}),
+        ...(event.split === true ? { split: true } : {}),
         ...(device ? { input: device } : {}),
         ...(hit ? { speaker: hit.name, speakerScore: hit.score } : {}),
       })

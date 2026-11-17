@@ -151,6 +151,16 @@ final class Utterance {
     var open = false
     let prerollMax = Int(prerollSeconds * Double(sampleRate))
     let releaseChunks = max(1, Int(silenceSeconds / 0.01))
+    /// 换人检测：每 1.6 秒取一次窗口声纹，和本句开头的锚点比。
+    var windowVector: (([Float]) -> [Float]?)?
+    var splitter = SpeakerSplitter()
+    let checkEvery = Int(1.6 * Double(sampleRate))
+    let windowSamples = Int(1.6 * Double(sampleRate))
+    let splitOverlap = Int(0.2 * Double(sampleRate))
+    let minSplitSamples = Int(2.5 * Double(sampleRate))
+    var lastCheck = 0
+    /// 这一段是不是「换人切开」切出来的前半截（用于在转写里留痕）。
+    var lastSplit = false
 
     func push(_ frame: [Float], now: Date) -> (flush: [Float], start: Date, speech: Double)? {
         pending.append(contentsOf: frame)
@@ -181,6 +191,27 @@ final class Utterance {
             speechSeconds += Double(chunk.count) / Double(sampleRate)
             if samples.count >= maxSamples {
                 return close()
+            }
+            // 两个人的声音被判成一句：按声纹在中间切开，各算各的
+            if windowVector != nil, samples.count - lastCheck >= checkEvery, samples.count >= minSplitSamples {
+                lastCheck = samples.count
+                let from = samples.count - windowSamples
+                if from > 0, let vec = windowVector?(Array(samples[from..<samples.count])),
+                   splitter.observe(vec) {
+                    let cut = max(minSamples, min(samples.count - 1, from + splitOverlap))
+                    let first = Array(samples[0..<cut])
+                    let firstStart = startedAt
+                    let firstSpeech = speechSeconds * Double(cut) / Double(samples.count)
+                    let rest = Array(samples[cut..<samples.count])
+                    samples = rest
+                    startedAt = now.addingTimeInterval(-Double(rest.count) / Double(sampleRate))
+                    speechSeconds = Double(rest.count) / Double(sampleRate)
+                    silenceRun = 0
+                    lastCheck = rest.count
+                    splitter.reset()
+                    lastSplit = true
+                    return (first, firstStart, firstSpeech)
+                }
             }
             return nil
         }
@@ -218,6 +249,9 @@ final class Utterance {
     }
 
     private func reset() {
+        splitter.reset()
+        lastSplit = false
+        lastCheck = 0
         samples = []
         preroll = []
         pending = []
@@ -324,6 +358,23 @@ final class SpeakerEmbedder {
         if let extractor { SherpaOnnxDestroySpeakerEmbeddingExtractor(extractor) }
     }
 
+    /// 原始向量，供内部的「换人检测」用，不走 base64。
+    func vector(_ samples: [Float]) -> [Float]? {
+        guard let extractor, !samples.isEmpty else { return nil }
+        guard let stream = SherpaOnnxSpeakerEmbeddingExtractorCreateStream(extractor) else { return nil }
+        defer { SherpaOnnxDestroyOnlineStream(stream) }
+        samples.withUnsafeBufferPointer { buffer in
+            SherpaOnnxOnlineStreamAcceptWaveform(stream, Int32(sampleRate), buffer.baseAddress, Int32(buffer.count))
+        }
+        SherpaOnnxOnlineStreamInputFinished(stream)
+        guard SherpaOnnxSpeakerEmbeddingExtractorIsReady(extractor, stream) != 0 else { return nil }
+        guard let raw = SherpaOnnxSpeakerEmbeddingExtractorComputeEmbedding(extractor, stream) else { return nil }
+        defer { SherpaOnnxSpeakerEmbeddingExtractorDestroyEmbedding(raw) }
+        var out = [Float](repeating: 0, count: dim)
+        for i in 0..<dim { out[i] = raw[i] }
+        return out
+    }
+
     /// float16 + base64：192 维只占 512 字节，JSON 不会膨胀。
     func embedding(_ samples: [Float]) -> String? {
         guard let extractor, !samples.isEmpty else { return nil }
@@ -413,6 +464,16 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         self.audioRoot = audioRoot
         self.inputUID = inputUID
         super.init()
+    }
+
+    /// 有语音模型时默认开启「换人切分」；--no-split-speaker 可关。
+    func enableSpeakerSplit(threshold: Float) {
+        guard let embedder else { return }
+        let splitter = { (window: [Float]) -> [Float]? in embedder.vector(window) }
+        mic.windowVector = splitter
+        system.windowVector = splitter
+        mic.splitter = SpeakerSplitter(threshold: threshold)
+        system.splitter = SpeakerSplitter(threshold: threshold)
     }
 
     func start() {
@@ -555,12 +616,14 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         let frames = stride(from: 0, to: samples.count, by: 320).map { Array(samples[$0..<min($0 + 320, samples.count)]) }
         for frame in frames {
             if let done = utterance.push(frame, now: now) {
-                finish(done.flush, track: track, start: done.start, speech: done.speech, end: now)
+                let split = utterance.lastSplit
+                if split { utterance.lastSplit = false }
+                finish(done.flush, track: track, start: done.start, speech: done.speech, end: now, split: split)
             }
         }
     }
 
-    func finish(_ samples: [Float], track: String, start: Date, speech: Double, end: Date) {
+    func finish(_ samples: [Float], track: String, start: Date, speech: Double, end: Date, split: Bool = false) {
         guard samples.count >= minSamples else { return }
         if track == "system" { systemSpeech += speech } else { micSpeech += speech }
         var audioPath = ""
@@ -600,6 +663,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
                 "speechSeconds": speech,
             ]
             if !audioPath.isEmpty { event["audio"] = audioPath }
+            if split { event["split"] = true }
             if let emb = embedder?.embedding(samples) { event["emb"] = emb }
             if track == "mic", !inputName.isEmpty { event["input"] = inputName }
             emit(event)
@@ -709,6 +773,9 @@ if external {
     model = loaded
 }
 let capture = Capture(model: model, mode: mode, language: language, audioRoot: external || mode == "raw" ? audio : nil, inputUID: arg("input"), embedModel: arg("embed-model"))
+if arg("no-split-speaker") == nil {
+    capture.enableSpeakerSplit(threshold: Float(arg("split-threshold") ?? "") ?? 0.55)
+}
 signal(SIGINT, SIG_IGN)
 signal(SIGTERM, SIG_IGN)
 let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
