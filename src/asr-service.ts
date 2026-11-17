@@ -210,6 +210,8 @@ export class AsrRuntime {
   private runningModelId: string | null = null
   private memory: MemorySample[] = []
   private memorySampleKey = ''
+  private tickTimer: ReturnType<typeof setInterval> | null = null
+  private highMemoryStrikes = 0
   private memoryTimer: ReturnType<typeof setInterval> | null = null
   /** Last footprint actually measured while an external model was loaded. */
   private loadedFor: string | null = null
@@ -470,6 +472,7 @@ export class AsrRuntime {
     this.memory = []
     this.audioTicks = []
     this.watchMemory()
+    this.startSleepWatch()
     const child = spawn(helper, args, { stdio: ['ignore', 'pipe', 'pipe'] })
     this.child = child
     try {
@@ -551,6 +554,28 @@ export class AsrRuntime {
     }
   }
 
+
+  /**
+   * 睡眠检测：睡眠期间 setInterval 不触发。醒来后第一次 tick 的间隔会明显变长，
+   * 据此判定「刚睡醒」，把中断归因为 sleep 而不是误报成「采集没有心跳」。
+   */
+  private startSleepWatch(): void {
+    if (this.tickTimer) clearInterval(this.tickTimer)
+    let last = Date.now()
+    this.tickTimer = setInterval(() => {
+      const now = Date.now()
+      const gap = now - last
+      last = now
+      if (gap < 5_000) return
+      if (!this.child) return
+      // 睡醒：记一次 sleep，并把心跳计时归零，避免 watchdog 立刻判 stall
+      this.recordInterruption('sleep', Math.round(gap / 1000))
+      this.lastEventAt = now
+      this.notice = null
+    }, 1_000)
+    this.tickTimer.unref?.()
+  }
+
   private watchStall(): void {
     if (this.watchdog) clearInterval(this.watchdog)
     const restart = (reason: string, message: string): void => {
@@ -569,13 +594,13 @@ export class AsrRuntime {
         return
       }
       // 听到人声却八分钟没有一条转写：转写链路出问题
-      if (this.speechWithoutSnippetSec >= 60 && this.lastSnippetAt) {
+      if (this.speechWithoutSnippetSec >= 20 && this.lastSnippetAt) {
         const since = Date.now() - Date.parse(this.lastSnippetAt)
-        if (since > 8 * 60_000) {
+        if (since > 120_000) {
           this.recordInterruption('silent', Math.round(since / 1000))
           restart('有语音但长时间没有转写', '转写好像卡住了，正在重连…')
         }
-      } else if (this.speechWithoutSnippetSec >= 60 && !this.lastSnippetAt) {
+      } else if (this.speechWithoutSnippetSec >= 20 && !this.lastSnippetAt) {
         restart('有语音但一直没有转写', '转写好像卡住了，正在重连…')
       }
     }
@@ -793,6 +818,17 @@ export class AsrRuntime {
       this.loadedFootprint = parts.footprint
     }
     const occupied = applyMeasured(parts, held)
+    // 程序堆连续三次超过 300MB 就给人一句提示（不再需要盯曲线）
+    if (occupied.heap > 300 * 1024 * 1024) {
+      this.highMemoryStrikes += 1
+      if (this.highMemoryStrikes >= 3) {
+        this.notice = `程序堆已连续 ${this.highMemoryStrikes} 次采样超过 300 MB（当前 ${Math.round(occupied.heap / 1024 / 1024)} MB），可能是模型或缓冲没有释放。`
+      }
+    } else if (this.highMemoryStrikes > 0) {
+      this.highMemoryStrikes = 0
+      if (this.notice?.startsWith('程序堆已连续')) this.notice = null
+    }
+
     const sample = { at: new Date().toISOString(), ...occupied }
     this.memory = trimMemory([...this.memory, sample])
     this.appendMemorySample({
@@ -850,9 +886,8 @@ export class AsrRuntime {
 
   /** 每分钟落一条内存样本，供「当天 00:00–24:00」的曲线用。 */
   private appendMemorySample(sample: { at: string; occupied: number; heap: number; audio: number; fixed: number; mapped: number }): void {
-    // 30 秒一条：最近 5 分钟的图才有 10 个点，而不是 5 个
-    const seconds = sample.at.slice(17, 19)
-    const key = `${sample.at.slice(0, 16)}:${Number(seconds) < 30 ? '0' : '3'}`
+    // 1 分钟一条：全天视图本来就按 5 分钟聚合，写更细只是浪费
+    const key = sample.at.slice(0, 16)
     if (key === this.memorySampleKey) return
     this.memorySampleKey = key
     try {
@@ -861,7 +896,7 @@ export class AsrRuntime {
       // 只留最近两天，避免文件无限长
       const lines = readFileSync(file, 'utf8').trim().split('\n')
       if (lines.length > 6000) {
-        writeFileSync(file, `${lines.slice(-4000).join('\n')}\n`, 'utf8')
+        writeFileSync(file, `${lines.slice(-3000).join('\n')}\n`, 'utf8')
       }
     } catch {
       // 写不进去不影响采集
@@ -876,7 +911,7 @@ export class AsrRuntime {
       void this.sampleMemory(pid)
     }
     tick()
-    this.memoryTimer = setInterval(tick, 5_000)
+    this.memoryTimer = setInterval(tick, 10_000)
     this.memoryTimer.unref?.()
   }
 
@@ -884,6 +919,10 @@ export class AsrRuntime {
     if (this.memoryTimer) {
       clearInterval(this.memoryTimer)
       this.memoryTimer = null
+    }
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer)
+      this.tickTimer = null
     }
     if (this.watchdog) {
       clearInterval(this.watchdog)
