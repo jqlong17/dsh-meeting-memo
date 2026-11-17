@@ -835,6 +835,12 @@ export function Panel(props: PanelProps) {
   useEffect(() => {
     if (tab !== 'speaker') return
     void loadSpeaker()
+    // 定时刷新：打标、重算、采样数变化都靠它自愈，不用手动切标签
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void loadSpeaker()
+    }, 15_000)
+    return () => window.clearInterval(timer)
   }, [tab, loadSpeaker])
 
   /** 选区范围；没点「开始」时用最近 10 分钟做默认。 */
@@ -959,6 +965,7 @@ export function Panel(props: PanelProps) {
         .replace('{e}', String(value.enrolled))
         + (parts ? ` · ${parts}` : ''))
       void loadAssign(value.day)
+      void loadSpeaker()
     } finally {
       setRebuilding(false)
     }
