@@ -4,7 +4,6 @@
  * 纯文本、无 Node 依赖，面板直接引用。改版本号时这句话术会跟着变，
  * 不会出现「界面 0.2.0、话术 0.1.x」这种不一致。
  */
-import { PLUGIN_VERSION } from './version.ts'
 
 export const PACKAGE_NAME = 'dsh-meeting-memo'
 
@@ -21,15 +20,16 @@ export const INTRO_EN: string[] = [
 ]
 
 /** 别人把这段话丢给任意一个能操作本机的 AI，就能自己把插件装上并把模型配好。 */
-export function buildSharePrompt(version = PLUGIN_VERSION): string {
-  return `请帮我在 DeepSeek Harness 上安装插件 ${PACKAGE_NAME}（中文名「会议纪要」，版本 ${version}），并把语音模型按这台机器的系统配好。
+export function buildSharePrompt(): string {
+  // 不写死版本号：插件一直在更新，让对方直接装最新的就行
+  return `请帮我在 DeepSeek Harness 上安装插件 ${PACKAGE_NAME}（中文名「会议纪要」），并把语音模型按这台机器的系统配好。
 
 它是右侧栏的会议纪要插件：本机录音、本地转写，再把选中的一段整理成背景、要点、决策和待办。音频和文字都不离开这台机器。
 
 请按顺序做，每步做完告诉我结果：
 
 1. 确认当前 DSH 的 profile 名称（一般看 ~/.dsh/profiles/ 下哪个是你在用的）。
-2. 安装：dsh plugin --profile <你的profile> add ${PACKAGE_NAME}
+2. 安装：dsh plugin --profile <你的profile> add ${PACKAGE_NAME}@latest
    如果 npm 上取不到这个包，直接告诉我，别自己改写依赖或去装同名的其它包。
 3. 重启 DeepSeek Harness。插件只在启动时扫描一次，不重启不会出现。
 4. 按系统选语音模型，这一步由你判断，不要让我自己挑：
@@ -39,20 +39,20 @@ export function buildSharePrompt(version = PLUGIN_VERSION): string {
    - 下载由插件自己完成，不要手动往模型目录拷文件。如果「转写服务」里没有出现这两个条目，说明插件没加载成功，回到第 2 步。
    - 下载完成后在列表里点一下该模型，确认它显示「使用中」。
 5. 首次使用会申请麦克风和屏幕录制权限，请提醒我在系统设置里授权。
-6. 最后打开右侧栏「会议纪要」，确认标题下面刷新按钮右边的版本号是 ${version}。
+6. 最后打开右侧栏「会议纪要」，界面能正常显示就说明装好了。
 
 如果哪一步报错，把错误原文贴给我，不要猜着改配置文件。`
 }
 
-export function buildSharePromptEn(version = PLUGIN_VERSION): string {
-  return `Please install the DeepSeek Harness plugin ${PACKAGE_NAME} (Meeting Minutes, version ${version}) on this machine, and set up the speech model for this OS.
+export function buildSharePromptEn(): string {
+  return `Please install the DeepSeek Harness plugin ${PACKAGE_NAME} (Meeting Minutes) on this machine, and set up the speech model for this OS.
 
 It is a right-sidebar meeting-notes plugin: local capture, local transcription, then a selected span becomes structured minutes with background, key points, decisions, and to-dos. Audio and text never leave this machine.
 
 Do this in order and report back after each step:
 
 1. Find the DSH profile in use (usually one of ~/.dsh/profiles/).
-2. Install: dsh plugin --profile <profile> add ${PACKAGE_NAME}
+2. Install: dsh plugin --profile <profile> add ${PACKAGE_NAME}@latest
    If npm cannot resolve the package, tell me instead of substituting another package.
 3. Restart DeepSeek Harness. Plugins are only scanned at startup.
 4. Pick the speech model for this OS — you decide, do not ask me:
@@ -62,7 +62,7 @@ Do this in order and report back after each step:
    - The plugin performs the download; do not copy files into the model folder by hand. If neither entry appears under Transcribe, the plugin did not load — go back to step 2.
    - When it finishes, click the model in the list and confirm it shows as in use.
 5. The first run asks for microphone and screen-recording permission on macOS; remind me to grant it.
-6. Open Meeting Minutes in the right sidebar and confirm the version next to the refresh button reads ${version}.
+6. Open Meeting Minutes in the right sidebar; if the panel renders, it is installed.
 
 If any step fails, paste the raw error back to me rather than editing config files on a guess.`
 }
