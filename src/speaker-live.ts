@@ -6,6 +6,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { readEmbMap } from './emb-store.ts'
 import path from 'node:path'
 
 import type { SpeakerLabel } from './speaker-labels.ts'
@@ -193,6 +194,8 @@ export function buildCentroids(
   for (const day of days) {
     const file = path.join(root, day, 'snippets.jsonl')
     if (!existsSync(file)) continue
+    // 声纹存在同目录的 emb.jsonl（旧文件仍可能内联），按行号合回来
+    const storedEmb = readEmbMap(path.join(root, day))
     const emb = new Map<number, Vector>()
     const audio = new Map<number, string>()
     const trackOf = new Map<number, string>()
@@ -208,8 +211,9 @@ export function buildCentroids(
       }
       if (typeof row.track === 'string') trackOf.set(index, row.track)
       if (typeof row.audio === 'string') audio.set(index, row.audio)
-      if (typeof row.emb !== 'string') continue
-      const vector = decodeEmbedding(row.emb)
+      const base64 = typeof row.emb === 'string' && row.emb ? row.emb : storedEmb.get(index)
+      if (!base64) continue
+      const vector = decodeEmbedding(base64)
       if (vector) emb.set(index, vector)
     }
     byDay.set(day, { emb, audio, track: trackOf })
