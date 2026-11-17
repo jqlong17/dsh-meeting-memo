@@ -277,6 +277,7 @@ export function Panel(props: PanelProps) {
   const [spkNote, setSpkNote] = useState('')
   const [spkView, setSpkView] = useState<'tag' | 'saved'>('tag')
   const [spkPicked, setSpkPicked] = useState<string[]>([])
+  const [spkTrack, setSpkTrack] = useState<'all' | 'mic' | 'system'>('all')
   const [assign, setAssign] = useState<Record<string, { speaker: string; name?: string; track: string }>>({})
   const loadAssignRef = useRef<(day: string) => Promise<void>>(async () => {})
   const [, setTick] = useState(0)
@@ -863,6 +864,7 @@ export function Panel(props: PanelProps) {
     const range = speakerRange()
     return (data?.segments ?? [])
       .filter((segment) => segment.e > range.start && segment.s < range.end)
+      .filter((segment) => spkTrack === 'all' || segment.track === spkTrack)
       .reverse()
   }
 
@@ -1525,6 +1527,13 @@ export function Panel(props: PanelProps) {
           <button type="button" style={chipStyle(spkView === 'saved')} onClick={() => setSpkView('saved')}>
             {t('panel.speaker.viewSaved')} {speaker?.total ? ` ${speaker.total}` : ''}
           </button>
+          <span style={{ flex: '1 1 auto' }} />
+          {/* 按轨道过滤：麦克风是本机说话，系统是会议里其他人的声音 */}
+          {(['all', 'mic', 'system'] as const).map((key) => (
+            <button key={key} type="button" style={chipStyle(spkTrack === key)} onClick={() => setSpkTrack(key)}>
+              {t(`panel.speaker.trackFilter.${key}`)}
+            </button>
+          ))}
         </div>
 
         {spkView === 'tag' ? (
