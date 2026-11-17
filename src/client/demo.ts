@@ -509,9 +509,11 @@ const SPEAKERS: SpeakerPayload = {
   groups: [{
     day: DAY,
     items: [
-      { id: 'spk-1', day: DAY, start: 545, end: 572, label: '苏晴', note: '测试负责人', lines: [1, 2, 5, 10], createdAt: at(10, 5), samples: 4, audioCount: 4 },
-      { id: 'spk-2', day: DAY, start: 553, end: 575, label: '陈默', note: '产品负责人', lines: [4, 8, 11], createdAt: at(10, 6), samples: 3, audioCount: 3 },
-      { id: 'spk-3', day: DAY, start: 550, end: 582, label: '林知远', note: '后端研发', lines: [3, 6, 9, 12], createdAt: at(10, 7), samples: 4, audioCount: 4 },
+      // 行号对应当天 36 条转写，跨四场会都有样本
+      { id: 'spk-1', day: DAY, start: 545, end: 968, label: '苏晴', note: '测试负责人', lines: [1, 2, 5, 10, 23, 25, 27, 31, 33], createdAt: at(16, 30), samples: 9, audioCount: 9 },
+      { id: 'spk-2', day: DAY, start: 553, end: 972, label: '陈默', note: '产品负责人', lines: [4, 8, 11, 14, 17, 21, 24, 29, 34], createdAt: at(16, 31), samples: 9, audioCount: 9 },
+      { id: 'spk-3', day: DAY, start: 550, end: 975, label: '林知远', note: '后端研发', lines: [3, 6, 9, 12, 16, 19, 22, 26, 28, 35], createdAt: at(16, 32), samples: 10, audioCount: 10 },
+      { id: 'spk-4', day: DAY, start: 630, end: 658, label: '周叙', note: '客户技术负责人', lines: [15, 18, 20], createdAt: at(11, 5), samples: 3, audioCount: 3 },
     ],
   }],
 } as unknown as SpeakerPayload

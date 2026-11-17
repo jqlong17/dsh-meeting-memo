@@ -759,11 +759,17 @@ export function Panel(props: PanelProps) {
   }, [tab, loadSpeaker])
 
   /** 选区范围；没点「开始」时用最近 10 分钟做默认。 */
+  /**
+   * 说话人页的默认区间：跟着「最后一条数据」走，而不是跟着当前时钟。
+   * 否则看历史日期、或者演示数据不在当前时段时，页面会一片空白。
+   */
   const speakerRange = () => {
     const now = clockNow()
+    const last = data ? Math.max(lastDataMinute(data), data.window.start) : now
+    const fallbackStart = Math.max(data?.window.start ?? 0, last - 120)
     return {
-      start: spkStart ?? Math.max(data?.window.start ?? 0, now - 10),
-      end: spkEnd ?? now,
+      start: spkStart ?? fallbackStart,
+      end: spkEnd ?? Math.max(now, last, fallbackStart + 1),
     }
   }
 
