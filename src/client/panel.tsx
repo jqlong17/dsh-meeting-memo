@@ -2965,6 +2965,7 @@ function MemoryTimeline({ samples, day, range, onRange, t }: {
   // 用户拖出来的窗口；空表示跟着「最近 1 小时 / 全天」走
   const [zoom, setZoom] = useState<{ start: number; end: number } | null>(null)
   const [dragging, setDragging] = useState<{ anchor: number; current: number } | null>(null)
+  const [hover, setHover] = useState<{ minute: number; x: number; point: { minute: number; heap: number; audio: number; fixed: number; mapped: number } } | null>(null)
   const windowStart = zoom ? zoom.start : baseStart
   const windowEnd = zoom ? zoom.end : baseEnd
   const span = Math.max(1, windowEnd - windowStart)
@@ -3029,6 +3030,7 @@ function MemoryTimeline({ samples, day, range, onRange, t }: {
           </button>
         ))}
       </div>
+      <div style={{ position: 'relative' }}>
       <svg
         viewBox={`0 0 ${width} ${height + 14}`}
         width="100%"
@@ -3043,11 +3045,21 @@ function MemoryTimeline({ samples, day, range, onRange, t }: {
           event.currentTarget.setPointerCapture(event.pointerId)
         }}
         onPointerMove={(event) => {
-          if (!dragging) return
           const rect = event.currentTarget.getBoundingClientRect()
-          const minute = minuteAt(((event.clientX - rect.left) / rect.width) * width)
-          setDragging({ ...dragging, current: minute })
+          const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+          const minute = minuteAt(ratio * width)
+          if (dragging) setDragging({ ...dragging, current: minute })
+          // 悬停取最近的一个采样点，显示那一刻的分类占用
+          if (!day.length) return
+          let nearest = day[0]
+          let distance = Math.abs(day[0].minute - minute)
+          for (const point of day) {
+            const diff = Math.abs(point.minute - minute)
+            if (diff < distance) { nearest = point; distance = diff }
+          }
+          setHover({ minute: nearest.minute, x: ratio * 100, point: nearest })
         }}
+        onPointerLeave={() => setHover(null)}
         onPointerUp={(event) => {
           if (!dragging) return
           const start = Math.min(dragging.anchor, dragging.current)
@@ -3086,6 +3098,45 @@ function MemoryTimeline({ samples, day, range, onRange, t }: {
           </text>
         ))}
       </svg>
+      {hover ? (
+        <div style={{
+          position: 'absolute',
+          top: 4,
+          left: `calc(${hover.x}% + ${hover.x > 55 ? -12 : 12}px)`,
+          transform: hover.x > 55 ? 'translateX(-100%)' : 'none',
+          pointerEvents: 'none',
+          background: 'var(--dsw-alias-bg-elevated)',
+          border: `1px solid ${BORDER}`,
+          borderRadius: RADIUS,
+          boxShadow: '0 6px 18px rgba(16,24,40,.12)',
+          padding: '5px 8px',
+          fontSize: FS.xs,
+          lineHeight: 1.6,
+          whiteSpace: 'nowrap',
+          zIndex: 2,
+        }}>
+          <div style={{ fontFamily: MONO, fontWeight: 600, marginBottom: 2 }}>
+            {`${String(Math.floor(hover.minute / 60)).padStart(2, '0')}:${String(Math.round(hover.minute % 60)).padStart(2, '0')}`}
+            {'  '}
+            {formatBytes((hover.point.heap || 0) + (hover.point.audio || 0) + (hover.point.fixed || 0), true)}
+          </div>
+          {stacks.map((part) => (
+            <div key={part.key} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ width: 6, height: 6, borderRadius: RADIUS_PILL, background: part.color }} />
+              <span style={{ color: FG2 }}>{t(`panel.asr.mem.${part.key}`)}</span>
+              <span style={{ fontFamily: MONO, marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(hover.point[part.key], true)}</span>
+            </div>
+          ))}
+          {(hover.point.mapped || 0) > 0 ? (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', opacity: 0.7 }}>
+              <span style={{ width: 6, height: 6, borderRadius: RADIUS_PILL, background: BORDER }} />
+              <span style={{ color: FG2 }}>{t('panel.asr.mem.mapped')}</span>
+              <span style={{ fontFamily: MONO, marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(hover.point.mapped, true)}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      </div>
       <div style={{ ...smallStyle, display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
         <span>{t('panel.asr.mem.dragHint')}</span>
         {zoom ? (
