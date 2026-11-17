@@ -459,6 +459,9 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     let inputUID: String?
     let embedder: SpeakerEmbedder?
     private(set) var inputName = ""
+    /// 当前实际在用的输入设备 id：用来发现「耳机被拔了 / 默认设备换了」
+    var currentInputID: AudioDeviceID = 0
+    var deviceWatch: DispatchSourceTimer?
 
     init(model: SenseVoice?, mode: String, language: String, audioRoot: String?, inputUID: String?, embedModel: String?) {
         self.embedder = embedModel.flatMap { SpeakerEmbedder(model: $0) }
@@ -484,6 +487,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         startMic()
         startSystem()
         watchSleep()
+        watchDevices()
         minuteStart = Date()
         emit(["type": "status", "phase": "running", "mic": engine != nil, "system": stream != nil, "input": inputName])
     }
@@ -513,6 +517,40 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         sleepWatch = timer
     }
 
+    /**
+     * 设备监视：耳机拔掉/插上、系统默认输入变了，都要立刻跟上。
+     * 否则面板会一直显示已经不存在的设备名，采集仍在用旧设备。
+     */
+    func watchDevices() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 5, repeating: 5)
+        timer.setEventHandler { [weak self] in
+            guard let self, self.engine != nil else { return }
+            let devices = inputDevices()
+            let wanted = self.inputUID.flatMap { uid in devices.first { $0.uid == uid }?.id } ?? defaultInputID() ?? 0
+            guard wanted != self.currentInputID else { return }
+            let name = devices.first { $0.id == wanted }?.name ?? ""
+            emit([
+                "type": "warn",
+                "track": "mic",
+                "message": "麦克风已切换为「\(name.isEmpty ? "系统默认" : name)」",
+                "using": name,
+            ])
+            self.restartMic()
+        }
+        timer.resume()
+        deviceWatch = timer
+    }
+
+    /// 只重建麦克风（系统音流不受输入设备影响）。
+    func restartMic() {
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop()
+        engine = nil
+        startMic()
+        emit(["type": "status", "phase": "running", "mic": engine != nil, "system": stream != nil, "input": inputName])
+    }
+
     /// 重建音频引擎与系统音流（睡眠/切设备/权限变化之后）。
     func restartCapture(reason: String) {
         engine?.inputNode.removeTap(onBus: 0)
@@ -536,7 +574,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         var chosen = inputUID.flatMap { uid in devices.first { $0.uid == uid } }
         // 钉住的设备被拔掉了：回退系统默认，并让插件知道（否则表现是「全绿但录不到」）
         if chosen == nil, let pinned = inputUID, !pinned.isEmpty {
-            let fallback = devices.first { $0.id == defaultInputID() }
+            let fallback = devices.first { $0.id == (defaultInputID() ?? 0) }
             emit([
                 "type": "warn",
                 "track": "mic",
@@ -556,8 +594,9 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
                 emit(["type": "error", "track": "mic", "message": "切换输入设备失败：\(chosen.name)"])
             }
         }
-        let actualID = chosen?.id ?? defaultInputID()
+        let actualID = chosen?.id ?? defaultInputID() ?? 0
         inputName = devices.first { $0.id == actualID }?.name ?? ""
+        currentInputID = actualID
         // 输入节点要用 inputFormat：outputFormat 是硬件处理后的渲染格式，
         // 两者在 USB 麦克风上可能不一致（48k 双声道 vs 44.1k），拿错会把样本算坏。
         let format = input.inputFormat(forBus: 0)
