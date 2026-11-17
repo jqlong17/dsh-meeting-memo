@@ -59,6 +59,19 @@ python3 scripts/speaker-eval.py 2026-11-16
 - 同人相似度均值 0.870、异人 0.195
 - 全天 125 个片段，阈值 0.65 时 74% 能归到已登记的人，其余标为未识别
 
+
+## 自动更新
+
+插件会自己检查有没有新版本：启动后读一次 npm 上的 `latest`（缓存 6 小时），发现比当前新就在面板顶部显示一条提示，点「现在更新」会执行
+
+```bash
+dsh plugin --profile <你的profile> add dsh-meeting-memo@latest
+```
+
+然后提示重启 DeepSeek Harness 生效。不会自己重启——重启会打断正在进行的录音和会话。
+
+开发模式（profile 里依赖写成 `link:`）不会做任何更新检查，避免把本地代码换成 npm 版。
+
 ## 手机上看
 
 DSH Pocket iOS → 「插件」→ 会议纪要 → 打开，就能看到今天采集了多少、以及最近几天的纪要。

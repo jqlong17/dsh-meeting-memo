@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 
-import type { AsrModelsPayload, AsrStatusDTO, MinutesRangeDTO, SpeakerPayload, BackgroundCardDTO, BackgroundsPayload, DayPayload, JobDTO, MemorySampleDTO, MinuteSessionDTO, MinutesOverview, MinutesPayload, ModelOfferDTO, SkillsPayload } from '../types.ts'
+import type { AsrModelsPayload, AsrStatusDTO, MinutesRangeDTO, UpdateStatusDTO, SpeakerPayload, BackgroundCardDTO, BackgroundsPayload, DayPayload, JobDTO, MemorySampleDTO, MinuteSessionDTO, MinutesOverview, MinutesPayload, ModelOfferDTO, SkillsPayload } from '../types.ts'
 import type { RpcCall, RpcError } from './rpc.ts'
 import { buildIndexCopy } from '../copy-index.ts'
 import { PLUGIN_VERSION } from '../version.ts'
@@ -278,6 +278,9 @@ export function Panel(props: PanelProps) {
   const listRef = useRef<HTMLDivElement | null>(null)
   // 用户手动往上翻之后就不再自动跳到最新
   const [followLatest, setFollowLatest] = useState(true)
+  const [update, setUpdate] = useState<UpdateStatusDTO | null>(null)
+  const [updateHidden, setUpdateHidden] = useState(false)
+  const [updating, setUpdating] = useState(false)
   const flashTimer = useRef<number | null>(null)
   const seenDoneJobs = useRef<Set<string>>(new Set())
   const jobsSeeded = useRef(false)
@@ -644,6 +647,38 @@ export function Panel(props: PanelProps) {
       if (target) void loadMinutes(target)
     }
   }, [loadMinutes])
+
+  useEffect(() => {
+    let alive = true
+    void rpc<UpdateStatusDTO>('update.check', {}).then((result) => {
+      if (!alive || !result.ok) return
+      setUpdate(result.value)
+    })
+    return () => { alive = false }
+  }, [rpc])
+
+  const applyUpdateNow = async () => {
+    setUpdating(true)
+    setNoticeError('')
+    try {
+      const result = await rpc<{ ok: boolean; output: string }>('update.apply', {})
+      if (!result.ok) {
+        setNoticeError(result.error.message)
+        return
+      }
+      if (!result.value.ok) {
+        setNoticeError(result.value.output || t('panel.update.failed'))
+        return
+      }
+      setNotice(t('panel.update.done'))
+      setUpdateHidden(true)
+      void rpc<UpdateStatusDTO>('update.check', { force: true }).then((next) => {
+        if (next.ok) setUpdate(next.value)
+      })
+    } finally {
+      setUpdating(false)
+    }
+  }
 
   const loadJobs = useCallback(async () => {
     const result = await rpc<{ jobs: JobDTO[] }>('jobs.list')
@@ -2387,6 +2422,39 @@ export function Panel(props: PanelProps) {
           </div>
         ) : null}
       </div>
+      {update?.hasUpdate && !updateHidden ? (
+        <div style={{
+          flex: '0 0 auto',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          margin: '0 10px 6px',
+          padding: '5px 8px',
+          border: `1px solid ${ACCENT}`,
+          borderRadius: RADIUS,
+          background: ACCENT_SOFT,
+          flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: FS.xs, fontWeight: 600, color: ACCENT }}>
+            {t('panel.update.available').replace('{v}', update.latest ?? '')}
+          </span>
+          <span style={{ ...smallStyle, fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
+            {update.current} → {update.latest}
+          </span>
+          <span style={{ flex: '1 1 auto' }} />
+          <button
+            type="button"
+            style={{ ...buttonStyle, borderColor: ACCENT, color: ACCENT }}
+            disabled={updating}
+            onClick={() => void applyUpdateNow()}
+          >
+            {updating ? t('panel.update.updating') : t('panel.update.now')}
+          </button>
+          <button type="button" style={buttonStyle} onClick={() => setUpdateHidden(true)}>
+            {t('panel.update.later')}
+          </button>
+        </div>
+      ) : null}
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {tab === 'today' ? renderToday() : tab === 'minutes' ? renderMinutes() : tab === 'background' ? renderBackground() : tab === 'jobs' ? renderJobs() : tab === 'asr' ? renderAsr() : tab === 'speaker' ? renderSpeaker() : renderAbout()}
       </div>

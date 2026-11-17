@@ -25,6 +25,9 @@ import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
 import { addLabel, deleteLabel, groupByDay, readLabels } from './speaker-labels.ts'
 import { readAssignments, writeAssignments } from './speaker-assignments.ts'
+import { applyUpdate, checkUpdate } from './update.ts'
+import { PACKAGE_NAME } from './about.ts'
+import { PLUGIN_VERSION } from './version.ts'
 import { audioPieces, diarizeTrack, nameSpeakers } from './speaker-diarize.ts'
 import { dayKey } from './asr-log.ts'
 import { listMinutesDays } from './minutes.ts'
@@ -111,6 +114,23 @@ async function dispatch(
         return { day, sessions: doc.sessions, mdPath: doc.mdPath }
       }).filter((group) => group.sessions.length > 0)
       return { mode, today, days: all, groups, total: groups.reduce((sum, group) => sum + group.sessions.length, 0) }
+    }
+    case 'update.check': {
+      return checkUpdate({
+        name: PACKAGE_NAME,
+        current: PLUGIN_VERSION,
+        profileDir: process.env.DSH_PROFILE_DIR,
+        profile: process.env.DSH_PROFILE,
+        force: payload.force === true,
+      })
+    }
+    case 'update.apply': {
+      const result = await applyUpdate({
+        name: PACKAGE_NAME,
+        profile: process.env.DSH_PROFILE,
+        cwd: process.env.DSH_PROFILE_DIR,
+      })
+      return result
     }
     case 'minutes.index':
       return service.indexFor(

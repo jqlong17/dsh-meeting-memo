@@ -253,6 +253,17 @@ export interface SkillsPayload {
 }
 
 
+
+export interface UpdateStatusDTO {
+  mode: 'link' | 'npm' | 'unknown'
+  current: string
+  latest: string | null
+  hasUpdate: boolean
+  checkedAt: string | null
+  error?: string
+  command: string
+}
+
 export interface MinutesGroupDTO {
   day: string
   sessions: MinuteSessionDTO[]
