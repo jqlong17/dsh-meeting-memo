@@ -2528,7 +2528,13 @@ export function Panel(props: PanelProps) {
   const renderMinutes = () => {
     const sessions = minutes?.sessions ?? []
     if (minutesMode !== 'day') {
-      const groups = minutesRange?.groups ?? []
+      // 倒序：日期新的在上，同一天里时间晚的在上（演示数据也走这里）
+      const groups = [...(minutesRange?.groups ?? [])]
+        .sort((a, b) => b.day.localeCompare(a.day))
+        .map((group) => ({
+          ...group,
+          sessions: [...group.sessions].sort((a, b) => b.start - a.start || b.end - a.end),
+        }))
       return (
         <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
           {minutesHeader()}
@@ -2607,7 +2613,7 @@ export function Panel(props: PanelProps) {
           ? <div style={{ ...smallStyle, lineHeight: 1.6, padding: '6px 0' }}>{t('panel.minutes.empty')}</div>
           : null}
         {editing && !editing.id ? renderEditor(editing) : null}
-        {sessions.map((session) => {
+        {[...sessions].sort((a, b) => b.start - a.start || b.end - a.end).map((session) => {
           if (editing && editing.id === session.id) return <div key={session.id}>{renderEditor(editing)}</div>
           const badge = sourceLabel(session.source, t)
           return (

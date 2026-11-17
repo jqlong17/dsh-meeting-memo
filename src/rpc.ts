@@ -113,10 +113,19 @@ async function dispatch(
         }
         selected = all.filter((day) => days.includes(day))
       }
-      const groups = selected.map((day) => {
-        const doc = service.minutesForDay(day)
-        return { day, sessions: doc.sessions, mdPath: doc.mdPath }
-      }).filter((group) => group.sessions.length > 0)
+      // 日期从新到旧、同一天内按时间从晚到早：面板「纪要」就是倒序时间线
+      const groups = selected
+        .slice()
+        .sort((a, b) => b.localeCompare(a))
+        .map((day) => {
+          const doc = service.minutesForDay(day)
+          return {
+            day,
+            sessions: [...doc.sessions].sort((a, b) => b.start - a.start || b.end - a.end),
+            mdPath: doc.mdPath,
+          }
+        })
+        .filter((group) => group.sessions.length > 0)
       return { mode, today, days: all, groups, total: groups.reduce((sum, group) => sum + group.sessions.length, 0) }
     }
     case 'update.check': {
