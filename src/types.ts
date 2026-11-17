@@ -170,6 +170,15 @@ export interface AsrStatusDTO {
   startedAt: string | null
   lastSnippetAt: string | null
   lastError: string | null
+  /** 链路心跳：用来判断「没数据」到底是没说话还是链路断了。 */
+  heartbeat?: {
+    eventAgeSec: number | null
+    snippetAgeSec: number | null
+    snippetsSinceStart: number
+    speechWithoutSnippetSec: number
+    restarts: number
+    lastReason: string | null
+  }
 }
 
 export interface MinuteSessionDTO {

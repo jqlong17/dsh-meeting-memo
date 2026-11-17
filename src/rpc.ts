@@ -25,6 +25,7 @@ import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
 import { addLabel, deleteLabel, groupByDay, readLabels } from './speaker-labels.ts'
 import { readAssignments, writeAssignments } from './speaker-assignments.ts'
+import { backfillLabel } from './speaker-backfill.ts'
 import { applyUpdate, checkUpdate, readUpdateState } from './update.ts'
 import { PACKAGE_NAME } from './about.ts'
 import { PLUGIN_VERSION } from './version.ts'
@@ -225,6 +226,11 @@ async function dispatch(
       requireAsr(asr).models.select(String(payload.id || ''))
       if (requireAsr(asr).runtime.status().enabled) void requireAsr(asr).runtime.start()
       return requireAsr(asr).models.list()
+    case 'asr.restart': {
+      const runtime = requireAsr(asr).runtime
+      await runtime.start()
+      return runtime.status()
+    }
     case 'asr.status':
       return requireAsr(asr).runtime.status()
     case 'asr.set': {
@@ -369,12 +375,15 @@ async function dispatch(
         lines: recent.map((row) => row.line),
         note: '快速登记',
       })
+      const applied = backfillLabel(service.config.home, service.config.timeZone, item)
       void deviceRow
-      return { item, samples: recent.length, day }
+      return { item, samples: recent.length, day, applied }
     }
     case 'speaker.add': {
       const result = addLabel(service.config.home, payload.item)
-      return { item: result.item, total: result.items.length }
+      // 用户亲手打标的行立刻生效，不等下一次识别
+      const applied = backfillLabel(service.config.home, service.config.timeZone, result.item)
+      return { item: result.item, total: result.items.length, applied }
     }
     case 'speaker.delete':
       return { total: deleteLabel(service.config.home, String(payload.id || '')).length }

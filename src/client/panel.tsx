@@ -829,7 +829,7 @@ export function Panel(props: PanelProps) {
       setNoticeError(t('panel.speaker.needRange'))
       return
     }
-    const result = await rpc('speaker.add', {
+    const result = await rpc<{ item: unknown; total: number; applied?: number }>('speaker.add', {
       item: {
         day: data.day,
         start,
@@ -849,8 +849,12 @@ export function Panel(props: PanelProps) {
     setSpkPicked([])
     setSpkLabel('')
     setSpkNote('')
-    setNotice(t('panel.speaker.saved'))
+    const applied = result.ok ? (result.value.applied ?? 0) : 0
+    setNotice(applied > 0 ? `已保存标签，并把这 ${applied} 句标记为「${label}」` : t('panel.speaker.saved'))
     void loadSpeaker()
+    // 标签回填会写分配表：重新拉分配表 + 当天数据，刚打标的行立刻显示名字
+    if (data?.day) void loadAssignRef.current(data.day)
+    void loadDayRef.current(dayRef.current || undefined)
   }
 
   const enrollRecent = async () => {
@@ -1025,6 +1029,24 @@ export function Panel(props: PanelProps) {
       return
     }
     setAsr(result.value)
+  }
+
+  const [restartingAsr, setRestartingAsr] = useState(false)
+
+  const restartAsr = async () => {
+    setRestartingAsr(true)
+    setNoticeError('')
+    try {
+      const result = await rpc<AsrStatusDTO>('asr.restart', {})
+      if (!result.ok) {
+        setNoticeError(result.error.message)
+        return
+      }
+      setAsr(result.value)
+      setNotice(t('panel.asr.hb.restarted'))
+    } finally {
+      setRestartingAsr(false)
+    }
   }
 
   const setAsrInput = async (uid: string) => {
@@ -1583,6 +1605,24 @@ export function Panel(props: PanelProps) {
     )
   }
 
+  const heartbeat = asr?.heartbeat
+  const hbState = (() => {
+    const event = heartbeat?.eventAgeSec
+    const snippet = heartbeat?.snippetAgeSec
+    if (typeof event === 'number' && event > 60) return 'stalled'
+    if (typeof snippet === 'number' && snippet > 600) return 'quiet'
+    if (typeof event === 'number' && event > 15) return 'warn'
+    return 'ok'
+  })()
+  const hbColor = hbState === 'stalled' ? DANGER : hbState === 'ok' ? SUCCESS : WARN
+  const hbLabel = t(`panel.asr.hb.state.${hbState}`)
+  const ageText = (seconds: number | null | undefined): string => {
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return t('panel.asr.hb.none')
+    if (seconds < 60) return t('panel.asr.hb.secondsAgo').replace('{s}', String(Math.max(0, Math.round(seconds))))
+    if (seconds < 3600) return t('panel.asr.hb.minutesAgo').replace('{s}', String(Math.round(seconds / 60)))
+    return t('panel.asr.hb.hoursAgo').replace('{s}', String(Math.round(seconds / 3600)))
+  }
+
   const renderAsr = () => {
     const phase = asr?.phase ?? 'idle'
     const phaseColor = phase === 'running' ? SUCCESS : phase === 'failed' ? DANGER : CAPTION
@@ -1703,6 +1743,39 @@ export function Panel(props: PanelProps) {
             </div>
           ) : null}
           <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.45 }}>{t('panel.asr.health.hint')}</div>
+        </div>
+
+        {/* 链路心跳：区分「没说话」和「链路断了」 */}
+        <div style={{ ...cardStyle, marginTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.asr.hb.title')}</span>
+            <span style={{ ...smallStyle, color: hbColor }}>{hbLabel}</span>
+            <span style={{ flex: '1 1 auto' }} />
+            <button
+              type="button"
+              style={buttonStyle}
+              disabled={restartingAsr}
+              onClick={() => void restartAsr()}
+            >
+              {restartingAsr ? t('panel.asr.hb.restarting') : t('panel.asr.hb.restart')}
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '72px minmax(0, 1fr)', columnGap: 8, marginTop: 6, fontSize: FS.xs, lineHeight: 1.7 }}>
+            <span style={{ color: CAPTION }}>{t('panel.asr.hb.event')}</span>
+            <span style={{ fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>{ageText(heartbeat?.eventAgeSec)}</span>
+            <span style={{ color: CAPTION }}>{t('panel.asr.hb.snippet')}</span>
+            <span style={{ fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>{ageText(heartbeat?.snippetAgeSec)}</span>
+            <span style={{ color: CAPTION }}>{t('panel.asr.hb.produced')}</span>
+            <span style={{ fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
+              {heartbeat?.snippetsSinceStart ?? 0} {t('panel.asr.hb.rows')}
+              {(heartbeat?.speechWithoutSnippetSec ?? 0) > 0
+                ? ` · ${t('panel.asr.hb.pendingSpeech').replace('{s}', String(Math.round(heartbeat?.speechWithoutSnippetSec ?? 0)))}`
+                : ''}
+            </span>
+            <span style={{ color: CAPTION }}>{t('panel.asr.hb.recover')}</span>
+            <span>{heartbeat?.restarts ?? 0} {t('panel.asr.hb.times')}{heartbeat?.lastReason ? ` · ${heartbeat.lastReason}` : ''}</span>
+          </div>
+          <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.45 }}>{t('panel.asr.hb.hint')}</div>
         </div>
 
         <div style={{ ...cardStyle, marginTop: 8 }}>

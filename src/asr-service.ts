@@ -42,6 +42,21 @@ export interface AsrStatus {
   message: string
   startedAt: string | null
   lastSnippetAt: string | null
+  /** 链路心跳：采集进程多久没吭声、多久没出转写、这次启动以来出过几条。 */
+  heartbeat: {
+    /** 最近一次采集事件（每秒都有，正常应 < 5 秒）。 */
+    eventAgeSec: number | null
+    /** 最近一条转写距今秒数。 */
+    snippetAgeSec: number | null
+    /** 本次启动以来产出的转写条数。 */
+    snippetsSinceStart: number
+    /** 有语音但迟迟没有转写的累计秒数（判定「转写哑了」）。 */
+    speechWithoutSnippetSec: number
+    /** 自动恢复次数（心跳丢失 / 音频断流 / 转写哑掉）。 */
+    restarts: number
+    /** 最近一次自动恢复的原因。 */
+    lastReason: string | null
+  }
   lastError: string | null
 }
 
@@ -175,6 +190,9 @@ export class AsrRuntime {
   private system: boolean | null = null
   private startedAt: string | null = null
   private lastSnippetAt: string | null = null
+  private snippetsSinceStart = 0
+  private speechWithoutSnippetSec = 0
+  private lastRestartReason: string | null = null
   private lastError: string | null = null
   private helperPath: string | null = null
   private buffer = ''
@@ -256,6 +274,14 @@ export class AsrRuntime {
       message: this.message,
       startedAt: this.startedAt,
       lastSnippetAt: this.lastSnippetAt,
+      heartbeat: {
+        eventAgeSec: this.lastEventAt ? Math.round((Date.now() - this.lastEventAt) / 1000) : null,
+        snippetAgeSec: this.lastSnippetAt ? Math.round((Date.now() - Date.parse(this.lastSnippetAt)) / 1000) : null,
+        snippetsSinceStart: this.snippetsSinceStart,
+        speechWithoutSnippetSec: Math.round(this.speechWithoutSnippetSec),
+        restarts: this.restarts,
+        lastReason: this.lastRestartReason,
+      },
       lastError: this.lastError,
     }
   }
@@ -420,6 +446,8 @@ export class AsrRuntime {
     const inputArgs = this.persisted.input ? ['--input', this.persisted.input] : []
     const embedArgs = this.embedModel ? ['--embed-model', this.embedModel] : []
     this.snippetLine = countSnippetLines(this.logRoot(), dayKey(this.timeZone))
+    this.snippetsSinceStart = 0
+    this.speechWithoutSnippetSec = 0
     const args = external
       ? ['capture', '--engine', 'external', '--audio', audio, '--mode', this.persisted.mode, '--language', this.persisted.language, ...inputArgs]
       : ['capture', '--model', model.path, '--mode', this.persisted.mode, '--language', this.persisted.language, ...(this.persisted.mode === 'raw' ? ['--audio', audio] : []), ...inputArgs, ...embedArgs]
@@ -471,16 +499,37 @@ export class AsrRuntime {
    * stays alive and silent. The helper emits activity once a minute, so a long
    * silence means capture is gone even though nothing exited.
    */
+  /**
+   * 两种「没数据」要分开处理：
+   *   1. 采集进程不吭声（心跳丢失）→ 进程死了或卡住，重启。
+   *   2. 进程正常、也确实听到人说话，但久不出转写 → 转写链路哑了，同样重启。
+   * 区分二者的意义：第 2 种以前完全静默，用户只会觉得「怎么没数据」。
+   */
   private watchStall(): void {
     if (this.watchdog) clearInterval(this.watchdog)
+    const restart = (reason: string, message: string): void => {
+      this.lastRestartReason = reason
+      this.lastError = `${reason}，已重启采集。`
+      this.message = message
+      this.stopChild()
+      setTimeout(() => { void this.start() }, 1_000)
+    }
     const check = (): void => {
       if (!this.child || this.disposed) return
       const silentFor = Date.now() - this.lastEventAt
-      if (silentFor < 180_000) return
-      this.lastError = '采集进程三分钟没有心跳，已重启。'
-      this.message = '麦克风好像断了，正在重新接上…'
-      this.stopChild()
-      setTimeout(() => { void this.start() }, 1_000)
+      if (silentFor >= 180_000) {
+        restart('采集进程三分钟没有心跳', '麦克风好像断了，正在重新接上…')
+        return
+      }
+      // 听到人声却八分钟没有一条转写：转写链路出问题
+      if (this.speechWithoutSnippetSec >= 60 && this.lastSnippetAt) {
+        const since = Date.now() - Date.parse(this.lastSnippetAt)
+        if (since > 8 * 60_000) {
+          restart('有语音但长时间没有转写', '转写好像卡住了，正在重连…')
+        }
+      } else if (this.speechWithoutSnippetSec >= 60 && !this.lastSnippetAt) {
+        restart('有语音但一直没有转写', '转写好像卡住了，正在重连…')
+      }
     }
     this.watchdog = setInterval(check, 30_000)
     this.watchdog.unref?.()
@@ -555,6 +604,8 @@ export class AsrRuntime {
         ...(hit ? { speaker: hit.name, speakerScore: hit.score } : {}),
       })
       this.snippetLine += 1
+      this.snippetsSinceStart += 1
+      this.speechWithoutSnippetSec = 0
       if (hit) this.writeAssignment(day, this.snippetLine, track, hit)
       this.lastSnippetAt = endAt
       return
@@ -562,6 +613,9 @@ export class AsrRuntime {
     if (type === 'activity') {
       const startAt = String(event.startAt || '')
       if (!startAt) return
+      // 有语音却一直没转写，说明转写链路哑了（不是没说话）
+      const speech = (Number(event.micSpeechSeconds) || 0) + (Number(event.systemSpeechSeconds) || 0)
+      this.speechWithoutSnippetSec = speech > 0.5 ? this.speechWithoutSnippetSec + speech : this.speechWithoutSnippetSec
       appendActivity(this.logRoot(), {
         day: dayKey(this.timeZone, new Date(startAt)),
         startAt,

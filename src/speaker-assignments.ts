@@ -1,7 +1,7 @@
 /**
  * 「某天某行是谁说的」的落库文件，面板和移动端都读它。
  *
- * 两种来源写这里：实时匹配（source=live）和批量分离（source=batch）。
+ * 三种来源写这里：实时匹配（live）、批量分离（batch）、人工标签回填（label，置信度 1）。
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -11,7 +11,7 @@ export interface Assignment {
   name?: string
   track: string
   score?: number
-  source?: 'live' | 'batch'
+  source?: 'live' | 'batch' | 'label'
 }
 
 export type AssignmentDays = Record<string, Record<string, Assignment>>
