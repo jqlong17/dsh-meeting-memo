@@ -276,8 +276,24 @@ async function dispatch(
       const nowMinute = now.getHours() * 60 + now.getMinutes()
       const start = range === 'day' ? 0 : Math.max(0, nowMinute - span)
       const end = range === 'day' ? 1440 : Math.max(span, nowMinute)
+      // 采集端按分钟打点，偶尔会跨过整整一分钟（14:29 → 14:31）。
+      // 单独缺 1 分钟不代表断线，只有「连续缺 ≥ 2 分钟」才算断。
+      const missing = new Set<number>()
+      for (let minute = Math.floor(start); minute < Math.ceil(end); minute += 1) {
+        if (!minutes.has(minute)) missing.add(minute)
+      }
+      const gapStarts = new Set<number>()
+      for (const minute of missing) {
+        if (missing.has(minute - 1)) continue
+        let length = 0
+        while (missing.has(minute + length)) length += 1
+        if (length >= 2) {
+          for (let offset = 0; offset < length; offset += 1) gapStarts.add(minute + offset)
+        }
+      }
+
       const step = range === 'day' ? 5 : 1
-      const points: Array<{ minute: number; state: 'ok' | 'idle' | 'gap'; speech: number; snippets: number }> = []
+      const points: Array<{ minute: number; state: 'ok' | 'idle' | 'gap' | 'future'; speech: number; snippets: number }> = []
       let ok = 0
       let idle = 0
       let gap = 0
@@ -292,10 +308,13 @@ async function dispatch(
           speech += hit.speech
           snippets += hit.snippets
         }
-        const state = !seen ? 'gap' : speech > 0.5 ? 'ok' : 'idle'
+        // 还没到的时间不算断，也不算采集
+        const future = minute + step > nowMinute && range === 'day'
+        const realGap = !seen && gapStarts.has(minute) && !future
+        const state = future ? 'future' : realGap ? 'gap' : speech > 0.5 ? 'ok' : 'idle'
         if (state === 'ok') ok += 1
         else if (state === 'idle') idle += 1
-        else gap += 1
+        else if (state === 'gap') gap += 1
         points.push({ minute, state, speech, snippets })
       }
       return { day, range, start, end, points, summary: { total: points.length, ok, idle, gap } }

@@ -3076,7 +3076,7 @@ function trackColor(track: string): string {
  * 纵轴是每格里的语音秒数，红色竖带表示那一段没有采集。
  */
 function HeartbeatChart({ points, summary, range, t }: {
-  points: Array<{ minute: number; state: 'ok' | 'idle' | 'gap'; speech: number; snippets: number }>
+  points: Array<{ minute: number; state: 'ok' | 'idle' | 'gap' | 'future'; speech: number; snippets: number }>
   summary: { total: number; ok: number; idle: number; gap: number }
   range: 'minute' | 'hour' | 'day'
   t: (key: string) => string
@@ -3110,7 +3110,7 @@ function HeartbeatChart({ points, summary, range, t }: {
     : range === 'hour'
       ? [0, 15, 30, 45, 60].map((offset) => Math.round(viewStart + offset))
       : [0, 360, 720, 1080, 1440]
-  const label = (minute: number): string => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${range === 'minute' ? String(Math.round(minute % 60)).padStart(2, '0') : '00'}`
+  const label = (minute: number): string => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${range === 'day' ? '00' : String(Math.round(minute % 60)).padStart(2, '0')}`
 
   return (
     <div style={{ marginTop: 6 }}>
