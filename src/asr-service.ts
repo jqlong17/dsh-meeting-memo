@@ -3,7 +3,7 @@
  * closing the sidebar does not stop recording.
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -42,7 +42,15 @@ export interface AsrStatus {
   message: string
   startedAt: string | null
   lastSnippetAt: string | null
+  /** 需要人看一眼的提示（例如麦克风回退），不是错误。 */
+  notice: string | null
+  /** 最近的链路中断记录，最新的在前。 */
+  interruptions: Array<{ at: string; seconds: number; cause: 'sleep' | 'device' | 'stall' | 'silent' | 'restart' }>
   /** 链路心跳：采集进程多久没吭声、多久没出转写、这次启动以来出过几条。 */
+  /** 需要人看一眼的提示（例如麦克风回退），不是错误。 */
+  notice: string | null
+  /** 最近的链路中断记录，最新的在前。 */
+  interruptions: Array<{ at: string; seconds: number; cause: 'sleep' | 'device' | 'stall' | 'silent' | 'restart' }>
   heartbeat: {
     /** 最近一次采集事件（每秒都有，正常应 < 5 秒）。 */
     eventAgeSec: number | null
@@ -193,6 +201,8 @@ export class AsrRuntime {
   private snippetsSinceStart = 0
   private speechWithoutSnippetSec = 0
   private lastRestartReason: string | null = null
+  private notice: string | null = null
+  private interruptions: AsrStatus['interruptions'] = []
   private lastError: string | null = null
   private helperPath: string | null = null
   private buffer = ''
@@ -234,6 +244,7 @@ export class AsrRuntime {
     this.persisted = readPersisted(home)
     this.root = sourceRoot
     this.logRoot()
+    this.loadInterruptions()
   }
 
   logRoot(): string {
@@ -274,6 +285,8 @@ export class AsrRuntime {
       message: this.message,
       startedAt: this.startedAt,
       lastSnippetAt: this.lastSnippetAt,
+      notice: this.notice,
+      interruptions: this.interruptions.slice(0, 5),
       heartbeat: {
         eventAgeSec: this.lastEventAt ? Math.round((Date.now() - this.lastEventAt) / 1000) : null,
         snippetAgeSec: this.lastSnippetAt ? Math.round((Date.now() - Date.parse(this.lastSnippetAt)) / 1000) : null,
@@ -505,6 +518,38 @@ export class AsrRuntime {
    *   2. 进程正常、也确实听到人说话，但久不出转写 → 转写链路哑了，同样重启。
    * 区分二者的意义：第 2 种以前完全静默，用户只会觉得「怎么没数据」。
    */
+
+  /** 记一次中断，落盘 + 留在内存给面板看。 */
+  private recordInterruption(cause: 'sleep' | 'device' | 'stall' | 'silent' | 'restart', seconds: number, detail?: string): void {
+    const entry = { at: new Date().toISOString(), seconds: Math.max(0, Math.round(seconds)), cause }
+    this.interruptions = [entry, ...this.interruptions].slice(0, 20)
+    try {
+      appendFileSync(path.join(this.home, 'heartbeat.jsonl'), `${JSON.stringify({ ...entry, ...(detail ? { detail } : {}) })}\n`, 'utf8')
+    } catch {
+      // 写不进去不影响采集
+    }
+  }
+
+  /** 启动时把最近的中断读回来，面板不用等下一次故障才有内容。 */
+  private loadInterruptions(): void {
+    try {
+      const text = readFileSync(path.join(this.home, 'heartbeat.jsonl'), 'utf8')
+      const rows = text.trim().split('\n').slice(-20).reverse().flatMap((line) => {
+        try {
+          const row = JSON.parse(line) as { at?: string; seconds?: number; cause?: string }
+          if (!row.at || typeof row.seconds !== 'number') return []
+          const cause = row.cause === 'sleep' || row.cause === 'device' || row.cause === 'stall' || row.cause === 'silent' || row.cause === 'restart' ? row.cause : 'restart'
+          return [{ at: row.at, seconds: row.seconds, cause: cause as 'sleep' | 'device' | 'stall' | 'silent' | 'restart' }]
+        } catch {
+          return []
+        }
+      })
+      this.interruptions = rows
+    } catch {
+      this.interruptions = []
+    }
+  }
+
   private watchStall(): void {
     if (this.watchdog) clearInterval(this.watchdog)
     const restart = (reason: string, message: string): void => {
@@ -518,6 +563,7 @@ export class AsrRuntime {
       if (!this.child || this.disposed) return
       const silentFor = Date.now() - this.lastEventAt
       if (silentFor >= 180_000) {
+        this.recordInterruption('stall', Math.round(silentFor / 1000))
         restart('采集进程三分钟没有心跳', '麦克风好像断了，正在重新接上…')
         return
       }
@@ -525,6 +571,7 @@ export class AsrRuntime {
       if (this.speechWithoutSnippetSec >= 60 && this.lastSnippetAt) {
         const since = Date.now() - Date.parse(this.lastSnippetAt)
         if (since > 8 * 60_000) {
+          this.recordInterruption('silent', Math.round(since / 1000))
           restart('有语音但长时间没有转写', '转写好像卡住了，正在重连…')
         }
       } else if (this.speechWithoutSnippetSec >= 60 && !this.lastSnippetAt) {
@@ -579,6 +626,23 @@ export class AsrRuntime {
     }
     if (type === 'utt') {
       void this.transcribeUtt(event)
+      return
+    }
+    if (type === 'warn') {
+      const message = String(event.message || '').trim()
+      if (message) this.notice = message
+      // 钉住的设备没了：清掉固化配置，下次启动直接跟系统默认，避免天天无声
+      if (event.fallback === true && this.persisted.input) {
+        delete this.persisted.input
+        writePersisted(this.home, this.persisted)
+        this.recordInterruption('device', 0, String(event.lostUID ?? ''))
+      }
+      return
+    }
+    if (type === 'wake') {
+      const slept = Number(event.sleptSeconds) || 0
+      this.recordInterruption('sleep', slept)
+      this.notice = null
       return
     }
     if (type === 'snippet') {

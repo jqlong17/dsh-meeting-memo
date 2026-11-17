@@ -448,6 +448,10 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     var systemPeak: Float = 0
     var minuteStart = Date()
     var engine: AVAudioEngine?
+    /// 睡眠检测：墙上时钟与单调时钟的漂移（macOS 睡眠时单调时钟会停）。
+    var lastTickWall = Date()
+    var lastTickMono = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+    var sleepWatch: DispatchSourceTimer?
     var converter: AVAudioConverter?
     var stream: SCStream?
     let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: 1, interleaved: false)!
@@ -479,8 +483,49 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     func start() {
         startMic()
         startSystem()
+        watchSleep()
         minuteStart = Date()
         emit(["type": "status", "phase": "running", "mic": engine != nil, "system": stream != nil, "input": inputName])
+    }
+
+    /**
+     * 睡眠检测：macOS 睡眠时 CLOCK_UPTIME_RAW 停走、墙上时钟继续。
+     * 两者漂移超过 5 秒就说明刚睡醒 —— 此时音频引擎和 SCK 流多半已经死了，
+     * 主动重建，而不是等用户说话发现没反应。
+     */
+    func watchSleep() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 3, repeating: 3)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            let now = Date()
+            let mono = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+            let wall = now.timeIntervalSince(self.lastTickWall)
+            let steady = Double(mono - self.lastTickMono) / 1_000_000_000
+            self.lastTickWall = now
+            self.lastTickMono = mono
+            let slept = wall - steady
+            guard slept > 5 else { return }
+            emit(["type": "wake", "sleptSeconds": Int(slept)])
+            self.restartCapture(reason: "睡醒后重建")
+        }
+        timer.resume()
+        sleepWatch = timer
+    }
+
+    /// 重建音频引擎与系统音流（睡眠/切设备/权限变化之后）。
+    func restartCapture(reason: String) {
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop()
+        engine = nil
+        if let stream {
+            Task { try? await stream.stopCapture() }
+            self.stream = nil
+        }
+        inputName = ""
+        startMic()
+        startSystem()
+        _ = reason
     }
 
     func startMic() {
@@ -488,7 +533,20 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         let input = engine.inputNode
         // 先把输入设备切到指定的那个（耳机麦 / 内置麦），再读格式。
         let devices = inputDevices()
-        let chosen = inputUID.flatMap { uid in devices.first { $0.uid == uid } }
+        var chosen = inputUID.flatMap { uid in devices.first { $0.uid == uid } }
+        // 钉住的设备被拔掉了：回退系统默认，并让插件知道（否则表现是「全绿但录不到」）
+        if chosen == nil, let pinned = inputUID, !pinned.isEmpty {
+            let fallback = devices.first { $0.id == defaultInputID() }
+            emit([
+                "type": "warn",
+                "track": "mic",
+                "message": "指定的麦克风已断开，已临时改用「\(fallback?.name ?? "系统默认")」",
+                "fallback": true,
+                "lostUID": pinned,
+                "using": fallback?.name ?? "",
+            ])
+            chosen = fallback
+        }
         if let chosen, let unit = input.audioUnit {
             var device = chosen.id
             let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,

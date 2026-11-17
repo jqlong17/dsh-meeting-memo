@@ -1644,6 +1644,18 @@ export function Panel(props: PanelProps) {
     )
   }
 
+  const lastGap = (() => {
+    const gap = asr?.interruptions?.[0]
+    if (!gap) return t('panel.asr.hb.noGap')
+    const cause = t(`panel.asr.hb.cause.${gap.cause}`)
+    const when = new Date(gap.at)
+    const hhmm = `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`
+    const length = gap.seconds >= 60
+      ? t('panel.asr.hb.minutes').replace('{s}', String(Math.round(gap.seconds / 60)))
+      : (gap.seconds > 0 ? t('panel.asr.hb.seconds').replace('{s}', String(gap.seconds)) : '')
+    return `${hhmm} ${cause}${length ? ` ${length}` : ''}`
+  })()
+
   const heartbeat = asr?.heartbeat
   const hbState = (() => {
     const event = heartbeat?.eventAgeSec
@@ -1813,7 +1825,12 @@ export function Panel(props: PanelProps) {
             </span>
             <span style={{ color: CAPTION }}>{t('panel.asr.hb.recover')}</span>
             <span>{heartbeat?.restarts ?? 0} {t('panel.asr.hb.times')}{heartbeat?.lastReason ? ` · ${heartbeat.lastReason}` : ''}</span>
+            <span style={{ color: CAPTION }}>{t('panel.asr.hb.lastGap')}</span>
+            <span style={{ color: lastGap ? WARN : FG2 }}>{lastGap}</span>
           </div>
+          {asr?.notice ? (
+            <div style={{ ...smallStyle, marginTop: 6, color: WARN, lineHeight: 1.5 }}>{asr.notice}</div>
+          ) : null}
           <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.45 }}>{t('panel.asr.hb.hint')}</div>
         </div>
 
