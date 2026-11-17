@@ -2659,6 +2659,13 @@ function MemoryTimeline({ samples, t }: { samples: MemorySampleDTO[]; t: (key: s
           <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest[part.key] ?? 0, true)}</span>
         </div>
       )) : <div style={{ ...smallStyle, marginTop: 4 }}>{t('panel.asr.mem.wait')}</div>}
+      {latest && (latest.mapped ?? 0) > 0 ? (
+        <div style={{ display: 'grid', gridTemplateColumns: '8px 72px 72px', columnGap: 8, alignItems: 'center', marginTop: 4, fontSize: FS.xs, opacity: 0.7 }}>
+          <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: BORDER }} />
+          <span>{t('panel.asr.mem.mapped')}</span>
+          <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest.mapped, true)}</span>
+        </div>
+      ) : null}
 
     </div>
   )
