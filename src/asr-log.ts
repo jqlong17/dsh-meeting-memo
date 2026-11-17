@@ -99,6 +99,11 @@ export interface AsrActivityInput {
   micChars?: number
   systemChars?: number
   snippetCount?: number
+  /** 这一分钟收到多少个麦克风缓冲 / 峰值：用来判断「面板可用但实际没声音」 */
+  micBuffers?: number
+  micPeak?: number
+  systemBuffers?: number
+  systemPeak?: number
 }
 
 export function appendActivity(root: string, input: AsrActivityInput): void {
@@ -112,6 +117,10 @@ export function appendActivity(root: string, input: AsrActivityInput): void {
     systemChars: input.systemChars ?? 0,
     meetingChars: 0,
     snippetCount: input.snippetCount ?? 0,
+    ...(typeof input.micBuffers === 'number' ? { micBuffers: input.micBuffers } : {}),
+    ...(typeof input.micPeak === 'number' ? { micPeak: input.micPeak } : {}),
+    ...(typeof input.systemBuffers === 'number' ? { systemBuffers: input.systemBuffers } : {}),
+    ...(typeof input.systemPeak === 'number' ? { systemPeak: input.systemPeak } : {}),
     source: 'asr',
   }
   appendFileSync(path.join(dir, 'activity.jsonl'), `${JSON.stringify(row)}\n`, 'utf8')

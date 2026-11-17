@@ -746,6 +746,10 @@ export class AsrRuntime {
         micSpeechSeconds: Number(event.micSpeechSeconds) || 0,
         systemSpeechSeconds: Number(event.systemSpeechSeconds) || 0,
         micChars: Number(event.micChars) || 0,
+        ...(Number.isFinite(Number(event.micBuffers)) ? { micBuffers: Number(event.micBuffers) } : {}),
+        ...(Number.isFinite(Number(event.micPeak)) ? { micPeak: Number(event.micPeak) } : {}),
+        ...(Number.isFinite(Number(event.systemBuffers)) ? { systemBuffers: Number(event.systemBuffers) } : {}),
+        ...(Number.isFinite(Number(event.systemPeak)) ? { systemPeak: Number(event.systemPeak) } : {}),
         systemChars: Number(event.systemChars) || 0,
         snippetCount: Number(event.snippetCount) || 0,
       })
