@@ -278,6 +278,16 @@ export function Panel(props: PanelProps) {
   const listRef = useRef<HTMLDivElement | null>(null)
   // 用户手动往上翻之后就不再自动跳到最新
   const [followLatest, setFollowLatest] = useState(true)
+  const [chartHeight, setChartHeight] = useState<number>(() => {
+    try {
+      const saved = Number(window.localStorage.getItem('dsh-mm-chart-height'))
+      if (Number.isFinite(saved) && saved >= 80 && saved <= 420) return Math.round(saved)
+    } catch {
+      // 隐私模式下拿不到 localStorage
+    }
+    return 150
+  })
+
   const [update, setUpdate] = useState<UpdateStatusDTO | null>(null)
   const [updateHidden, setUpdateHidden] = useState(false)
   const [updating, setUpdating] = useState(false)
@@ -647,6 +657,14 @@ export function Panel(props: PanelProps) {
       if (target) void loadMinutes(target)
     }
   }, [loadMinutes])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('dsh-mm-chart-height', String(chartHeight))
+    } catch {
+      // 存不下来就只在本次会话生效
+    }
+  }, [chartHeight])
 
   useEffect(() => {
     let alive = true
@@ -1318,6 +1336,8 @@ export function Panel(props: PanelProps) {
             }}
             last2hDisabled={!onToday}
             allDisabled={!data}
+            height={chartHeight}
+            onResize={setChartHeight}
           />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0 6px', flexWrap: 'wrap' }}>
@@ -1971,6 +1991,8 @@ export function Panel(props: PanelProps) {
             onCommit={handleCommit}
             onLast2h={() => quickSelect('last2h')}
             onAll={() => quickSelect('all')}
+            height={chartHeight}
+            onResize={setChartHeight}
             extra={(
               <>
                 {noticeError ? <span style={{ ...smallStyle, color: DANGER }}>{noticeError}</span> : null}
@@ -2782,8 +2804,12 @@ function RangeSelector(props: {
   last2hDisabled?: boolean
   allDisabled?: boolean
   extra?: ReactNode
+  /** 时间轴高度，可拖动调整。 */
+  height?: number
+  onResize?: (height: number) => void
 }): ReactElement {
   const { t } = props
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null)
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -2817,7 +2843,41 @@ function RangeSelector(props: {
         formatTime={(minute) => clock(minute)}
         onDraft={props.onDraft}
         onCommit={props.onCommit}
+        {...(props.height ? { height: props.height } : {})}
       />
+      {props.onResize ? (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          title={t('panel.chart.resize')}
+          onPointerDown={(event) => {
+            if (!event.isPrimary) return
+            dragRef.current = { startY: event.clientY, startHeight: props.height ?? 150 }
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }}
+          onPointerMove={(event) => {
+            const drag = dragRef.current
+            if (!drag || !event.isPrimary) return
+            const next = Math.min(420, Math.max(80, drag.startHeight + (event.clientY - drag.startY)))
+            props.onResize?.(next)
+          }}
+          onPointerUp={(event) => {
+            dragRef.current = null
+            try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* 已经释放 */ }
+          }}
+          style={{
+            height: 8,
+            margin: '2px 0 4px',
+            cursor: 'row-resize',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            touchAction: 'none',
+          }}
+        >
+          <span style={{ width: 44, height: 3, borderRadius: RADIUS_PILL, background: BORDER }} />
+        </div>
+      ) : null}
     </>
   )
 }
