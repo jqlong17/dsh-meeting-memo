@@ -1594,16 +1594,18 @@ export function Panel(props: PanelProps) {
                   {t('panel.speaker.enrollRecent')}
                 </button>
               </div>
-              {spkPicked.length ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                  <span style={{ ...smallStyle, color: ACCENT }}>
-                    {t('panel.speaker.picked').replace('{n}', String(spkPicked.length))}
-                  </span>
-                  <button type="button" style={buttonStyle} onClick={() => setSpkPicked([])}>
-                    {t('panel.speaker.clearPick')}
-                  </button>
-                </div>
-              ) : null}
+              {/* 勾选工具：常驻，全选只作用于当前筛选下看得见的行 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                <span style={{ ...smallStyle, color: spkPicked.length ? ACCENT : CAPTION }}>
+                  {t('panel.speaker.picked').replace('{n}', String(spkPicked.length))}
+                </span>
+                <button type="button" style={buttonStyle} onClick={() => setSpkPicked(rows.map((segment) => rowKey(segment)))}>
+                  {t('panel.speaker.pickAll')}
+                </button>
+                <button type="button" style={buttonStyle} disabled={!spkPicked.length} onClick={() => setSpkPicked([])}>
+                  {t('panel.speaker.pickNone')}
+                </button>
+              </div>
               {renderNotices()}
               <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.5 }}>{t('panel.speaker.hint')}</div>
             </div>
