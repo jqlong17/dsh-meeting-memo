@@ -287,6 +287,9 @@ export function Panel(props: PanelProps) {
   const [openLabel, setOpenLabel] = useState<string | null>(null)
   const [labelLines, setLabelLines] = useState<Record<string, Array<{ line: number; startAt: string; track: string; text: string; speaker?: string }>>>({})
   const [linePicked, setLinePicked] = useState<number[]>([])
+  const [editingLabel, setEditingLabel] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editNote, setEditNote] = useState('')
 
   const toggleLabel = async (item: { id: string; day: string }) => {
     if (openLabel === item.id) {
@@ -299,6 +302,25 @@ export function Panel(props: PanelProps) {
       'speaker.labelLines', { day: item.day, labelId: item.id },
     )
     if (result.ok) setLabelLines((previous) => ({ ...previous, [item.id]: result.value.lines }))
+  }
+
+  const saveLabelEdit = async (item: { id: string; day: string; label: string; note?: string }) => {
+    const name = editName.trim()
+    if (!name) {
+      setNoticeError(t('panel.speaker.needLabel'))
+      return
+    }
+    const result = await rpc<{ item: { label: string }; linesRenamed: number }>(
+      'speaker.labelUpdate', { labelId: item.id, label: name, note: editNote },
+    )
+    if (!result.ok) {
+      setNoticeError(result.error.message)
+      return
+    }
+    setEditingLabel(null)
+    setNotice(t('panel.speaker.labelUpdated'))
+    void loadSpeaker()
+    if (result.value.linesRenamed) void loadAssign(item.day)
   }
 
   const removePickedLines = async (item: { id: string; day: string }) => {
@@ -1704,11 +1726,47 @@ export function Panel(props: PanelProps) {
                           ? t('panel.speaker.samples').replace('{n}', String(item.samples))
                           : t('panel.speaker.audioCount').replace('{n}', String(item.audioCount ?? 0))}
                       </span>
+                      <button
+                        type="button"
+                        style={buttonStyle}
+                        onClick={() => {
+                          if (editingLabel === item.id) {
+                            setEditingLabel(null)
+                            return
+                          }
+                          setEditingLabel(item.id)
+                          setEditName(item.label)
+                          setEditNote(item.note ?? '')
+                        }}
+                      >
+                        {editingLabel === item.id ? t('panel.speaker.cancel') : t('panel.speaker.edit')}
+                      </button>
                       <button type="button" style={{ ...buttonStyle, color: DANGER }} onClick={() => void deleteSpeaker(item.id)}>
                         {t('panel.speaker.delete')}
                       </button>
                     </div>
-                    {item.note ? <div style={{ ...smallStyle, marginTop: 3 }}>{item.note}</div> : null}
+                    {editingLabel === item.id ? (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                        <input
+                          style={{ ...inputStyle, flex: '1 1 120px', minWidth: 0 }}
+                          value={editName}
+                          placeholder={t('panel.speaker.labelHint')}
+                          onChange={(event) => setEditName(event.target.value)}
+                          onKeyDown={(event) => { if (event.key === 'Enter') void saveLabelEdit(item) }}
+                        />
+                        <input
+                          style={{ ...inputStyle, flex: '2 1 160px', minWidth: 0 }}
+                          value={editNote}
+                          placeholder={t('panel.speaker.note')}
+                          onChange={(event) => setEditNote(event.target.value)}
+                          onKeyDown={(event) => { if (event.key === 'Enter') void saveLabelEdit(item) }}
+                        />
+                        <button type="button" style={primaryButtonStyle} onClick={() => void saveLabelEdit(item)}>
+                          {t('panel.speaker.saveEdit')}
+                        </button>
+                      </div>
+                    ) : null}
+                    {editingLabel === item.id ? null : (item.note ? <div style={{ ...smallStyle, marginTop: 3 }}>{item.note}</div> : null)}
                     <div style={{ ...smallStyle, marginTop: 4 }}>
                       <button type="button" style={{ ...buttonStyle, padding: '1px 6px' }} onClick={() => void toggleLabel(item)}>
                         {openLabel === item.id ? t('panel.speaker.collapseLines') : t('panel.speaker.expandLines')}

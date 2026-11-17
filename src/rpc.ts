@@ -23,7 +23,7 @@ import { ModelDownloads } from './model-download.ts'
 import { defaultDownloadRoot, offerMatches, offersForPlatform } from './model-catalog.ts'
 import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
-import { addLabel, deleteLabel, groupByDay, readLabels, removeLabelLine, removeLabelLines } from './speaker-labels.ts'
+import { addLabel, deleteLabel, groupByDay, readLabels, removeLabelLine, removeLabelLines, updateLabel } from './speaker-labels.ts'
 import { readDayMap, listDays, writeDay } from './speaker-assignments.ts'
 import { readEmbMap } from './emb-store.ts'
 import { backfillLabel } from './speaker-backfill.ts'
@@ -609,6 +609,32 @@ async function dispatch(
         named: new Set([...named.values()]).size,
         names: [...new Set([...named.values()])],
       }
+    }
+    case 'speaker.labelUpdate': {
+      // 改名/改备注：名字变了就把这条标注覆盖的行也一起改名，避免两处不一致
+      const labelId = String(payload.labelId || '')
+      const before = readLabels(service.config.home).find((item) => item.id === labelId)
+      if (!before) throw new MeetingError('NO_LABEL', '标注不存在')
+      const patch: { label?: string; note?: string } = {}
+      if (typeof payload.label === 'string') patch.label = String(payload.label)
+      if (typeof payload.note === 'string') patch.note = String(payload.note)
+      const next = updateLabel(service.config.home, labelId, patch)
+      if (!next) throw new MeetingError('BAD_LABEL', '名字不能为空')
+      let updated = 0
+      if (next.label !== before.label) {
+        const map = readDayMap(service.config.home, before.day)
+        for (const line of before.lines ?? []) {
+          const entry = map[String(line)]
+          if (!entry) continue
+          map[String(line)] = { ...entry, name: next.label }
+          updated += 1
+        }
+        if (updated) {
+          writeDay(service.config.home, before.day, map)
+          service.invalidateSpeakerCache()
+        }
+      }
+      return { item: next, linesRenamed: updated }
     }
     case 'speaker.labelLines': {
       // 展开一条标注，看它到底覆盖了哪几句（按时间正序，便于核对）

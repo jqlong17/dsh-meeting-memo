@@ -107,6 +107,31 @@ export function deleteLabel(home: string, id: string): SpeakerLabel[] {
  * 句子删空就把整条标注删掉；返回剩下的标注（或 null 表示已删除）。
  */
 /** 批量摘掉若干句；一次读改写，避免逐句 IO。 */
+
+/** 改一条标注的名字/备注；只改这一条，不动别的。 */
+export function updateLabel(
+  home: string,
+  labelId: string,
+  patch: { label?: string; note?: string },
+): SpeakerLabel | null {
+  const items = readLabels(home)
+  const index = items.findIndex((item) => item.id === labelId)
+  if (index < 0) return null
+  const item = items[index]
+  const name = typeof patch.label === 'string' ? patch.label.trim().slice(0, 40) : item.label
+  if (!name) return null
+  const note = typeof patch.note === 'string' ? patch.note.trim().slice(0, 200) : (item.note ?? '')
+  const next: SpeakerLabel = {
+    ...item,
+    label: name,
+    ...(note ? { note } : {}),
+  }
+  if (!note) delete (next as { note?: string }).note
+  items[index] = next
+  writeAll(home, items)
+  return next
+}
+
 export function removeLabelLines(home: string, labelId: string, lines: number[]): SpeakerLabel | null {
   const drop = new Set(lines.filter((line) => Number.isFinite(line) && line > 0))
   if (!drop.size) return readLabels(home).find((item) => item.id === labelId) ?? null
