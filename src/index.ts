@@ -17,6 +17,9 @@ import { ModelDownloads } from './model-download.ts'
 import { registerMobile } from './mobile.ts'
 import { AsrRuntime } from './asr-service.ts'
 import { resolveConfig } from './config.ts'
+import { PACKAGE_NAME } from './about.ts'
+import { updateTick } from './update.ts'
+import { PLUGIN_VERSION } from './version.ts'
 import { MinutesJobStore } from './jobs.ts'
 import { registerMeetingRoutes } from './rpc.ts'
 import { MeetingError, MeetingService } from './service.ts'
@@ -82,6 +85,28 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
       asr.dispose()
     }
   }, 'meeting-minutes: jobs')
+
+  // 每天查一次新版本；装了 npm 版会自动升到最新，重启后生效
+  ctx.effect(() => {
+    const run = (): void => {
+      void updateTick({
+        home: service.config.home,
+        name: PACKAGE_NAME,
+        current: PLUGIN_VERSION,
+        profileDir: process.env.DSH_PROFILE_DIR,
+        profile: process.env.DSH_PROFILE,
+        autoUpdate: service.config.autoUpdate,
+      }).catch(() => {
+        // 检查失败不影响录音
+      })
+    }
+    const boot = setTimeout(run, 60_000)
+    const timer = setInterval(run, 6 * 60 * 60 * 1000)
+    return () => {
+      clearTimeout(boot)
+      clearInterval(timer)
+    }
+  }, 'meeting-minutes: update')
 
   ctx.inject(['llm'], (scope: Context) => {
     const llm = (scope as unknown as { llm?: Record<string, unknown> }).llm

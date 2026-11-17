@@ -230,6 +230,7 @@ export const zh = {
 
   'panel.jumpLatest': '定位到最新',
   'panel.update.available': '有新版本 {v}',
+  'panel.update.applied': '已自动更新到 {v}，重启后生效',
   'panel.update.now': '现在更新',
   'panel.update.updating': '更新中…',
   'panel.update.later': '稍后',
@@ -564,6 +565,7 @@ export const en: Record<keyof Labels, string> = {
 
   'panel.jumpLatest': 'Jump to latest',
   'panel.update.available': 'Version {v} available',
+  'panel.update.applied': 'Auto-updated to {v}; restart to apply',
   'panel.update.now': 'Update now',
   'panel.update.updating': 'Updating…',
   'panel.update.later': 'Later',

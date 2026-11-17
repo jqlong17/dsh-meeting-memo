@@ -62,7 +62,12 @@ python3 scripts/speaker-eval.py 2026-11-16
 
 ## 自动更新
 
-插件会自己检查有没有新版本：启动后读一次 npm 上的 `latest`（缓存 6 小时），发现比当前新就在面板顶部显示一条提示，点「现在更新」会执行
+**每天自动查一次**（状态记在 `update-state.json`，重启后不会重复查，也不会漏掉一整天）：
+
+- 装了 npm 版并且开了 `autoUpdate`（默认开）→ 发现新版本会**自动升级**，面板顶部提示「已自动更新到 x.y.z，重启后生效」
+- 关掉自动升级（配置 `autoUpdate: false`，或环境变量 `MEETING_MINUTES_AUTO_UPDATE=0`）→ 只提示，点「现在更新」才执行
+
+升级命令是
 
 ```bash
 dsh plugin --profile <你的profile> add dsh-meeting-memo@latest

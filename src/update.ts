@@ -6,7 +6,7 @@
  *   2. 升级只改 profile 的依赖并提示重启，不擅自重启 DSH —— 重启会中断正在进行的录音和会话。
  */
 import { execFile } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 export interface UpdateStatus {
@@ -118,6 +118,101 @@ export async function checkUpdate(input: {
     checkedAt: new Date(cache.at).toISOString(),
     ...(latest ? {} : { error: '取不到 npm 上的版本' }),
   }
+}
+
+
+/** 每天检查一次：状态落盘，重启后不会重复打扰，也不会漏掉一整天。 */
+export interface UpdateState {
+  /** 最近一次检查时间（ISO）。 */
+  checkedAt?: string
+  /** 最近一次自动升级完成的时间。 */
+  appliedAt?: string
+  /** 自动升级到的版本。 */
+  appliedVersion?: string
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function stateFile(home: string): string {
+  return path.join(home, 'update-state.json')
+}
+
+export function readUpdateState(home: string): UpdateState {
+  try {
+    return JSON.parse(readFileSync(stateFile(home), 'utf8')) as UpdateState
+  } catch {
+    return {}
+  }
+}
+
+export function writeUpdateState(home: string, state: UpdateState): void {
+  try {
+    writeFileSync(stateFile(home), `${JSON.stringify(state, null, 2)}\n`, 'utf8')
+  } catch {
+    // 写不进去只是会多查一次
+  }
+}
+
+/** 距上次检查是否已满一天。 */
+export function dueForCheck(state: UpdateState, now = Date.now(), intervalMs = DAY_MS): boolean {
+  if (!state.checkedAt) return true
+  const last = Date.parse(state.checkedAt)
+  if (!Number.isFinite(last)) return true
+  return now - last >= intervalMs
+}
+
+export interface TickResult {
+  checked: boolean
+  applied: boolean
+  status: UpdateStatus
+  state: UpdateState
+}
+
+/**
+ * 每天跑一次：检查新版本，必要时自动升级。
+ * 自动升级失败不影响使用，下一次检查会再试。
+ */
+export async function updateTick(input: {
+  home: string
+  name: string
+  current: string
+  profileDir?: string
+  profile?: string
+  autoUpdate: boolean
+  now?: number
+}): Promise<TickResult> {
+  const now = input.now ?? Date.now()
+  const state = readUpdateState(input.home)
+  if (!dueForCheck(state, now)) {
+    const status = await checkUpdate({
+      name: input.name,
+      current: input.current,
+      profileDir: input.profileDir,
+      profile: input.profile,
+    })
+    return { checked: false, applied: false, status, state }
+  }
+
+  const status = await checkUpdate({
+    name: input.name,
+    current: input.current,
+    profileDir: input.profileDir,
+    profile: input.profile,
+    force: true,
+  })
+  const next: UpdateState = { ...state, checkedAt: new Date(now).toISOString() }
+
+  let applied = false
+  if (input.autoUpdate && status.hasUpdate && status.latest && status.mode === 'npm') {
+    const result = await applyUpdate({ name: input.name, profile: input.profile, cwd: input.profileDir })
+    if (result.ok) {
+      applied = true
+      next.appliedAt = new Date().toISOString()
+      next.appliedVersion = status.latest
+    }
+  }
+  writeUpdateState(input.home, next)
+  return { checked: true, applied, status, state: next }
 }
 
 export interface ApplyResult {

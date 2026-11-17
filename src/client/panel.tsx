@@ -2422,7 +2422,7 @@ export function Panel(props: PanelProps) {
           </div>
         ) : null}
       </div>
-      {update?.hasUpdate && !updateHidden ? (
+      {(update?.hasUpdate || update?.appliedVersion) && !updateHidden ? (
         <div style={{
           flex: '0 0 auto',
           display: 'flex',
@@ -2436,20 +2436,24 @@ export function Panel(props: PanelProps) {
           flexWrap: 'wrap',
         }}>
           <span style={{ fontSize: FS.xs, fontWeight: 600, color: ACCENT }}>
-            {t('panel.update.available').replace('{v}', update.latest ?? '')}
+            {update.appliedVersion && update.appliedVersion === update.latest
+              ? t('panel.update.applied').replace('{v}', update.appliedVersion)
+              : t('panel.update.available').replace('{v}', update.latest ?? '')}
           </span>
           <span style={{ ...smallStyle, fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
             {update.current} → {update.latest}
           </span>
           <span style={{ flex: '1 1 auto' }} />
-          <button
-            type="button"
-            style={{ ...buttonStyle, borderColor: ACCENT, color: ACCENT }}
-            disabled={updating}
-            onClick={() => void applyUpdateNow()}
-          >
-            {updating ? t('panel.update.updating') : t('panel.update.now')}
-          </button>
+          {update.appliedVersion && update.appliedVersion === update.latest ? null : (
+            <button
+              type="button"
+              style={{ ...buttonStyle, borderColor: ACCENT, color: ACCENT }}
+              disabled={updating}
+              onClick={() => void applyUpdateNow()}
+            >
+              {updating ? t('panel.update.updating') : t('panel.update.now')}
+            </button>
+          )}
           <button type="button" style={buttonStyle} onClick={() => setUpdateHidden(true)}>
             {t('panel.update.later')}
           </button>

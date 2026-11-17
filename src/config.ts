@@ -13,6 +13,8 @@ export interface MeetingConfig {
   /** IANA time zone used to turn notta's UTC timestamps into local clock time. */
   timeZone: string
   /** Chart window (minutes of day). */
+  /** 每天自动检查并升级到 npm 最新版。 */
+  autoUpdate: boolean
   windowStart: number
   windowEnd: number
   /** Optional explicit model route for AI minutes; otherwise the Host default is used. */
@@ -52,6 +54,9 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv = process.env
     lifelogRoot: rootInput ? path.resolve(expandHome(rootInput)) : null,
     home: homeInput ? path.resolve(expandHome(homeInput)) : path.join(dshHome, 'meeting-memo'),
     timeZone: resolveTimeZone(config.timeZone),
+    autoUpdate: env.MEETING_MINUTES_AUTO_UPDATE === '0'
+      ? false
+      : (typeof config.autoUpdate === 'boolean' ? config.autoUpdate : true),
     // 一天就是 00:00–24:00：跨零点后数据才不会落进窗口之前
     windowStart: 0,
     windowEnd: 24 * 60,

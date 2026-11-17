@@ -262,6 +262,11 @@ export interface UpdateStatusDTO {
   checkedAt: string | null
   error?: string
   command: string
+  /** 已经自动升级到的版本（重启后生效）。 */
+  appliedVersion?: string
+  appliedAt?: string
+  /** 是否开启了自动升级。 */
+  autoUpdate?: boolean
 }
 
 export interface MinutesGroupDTO {
