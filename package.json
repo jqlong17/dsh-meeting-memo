@@ -1,6 +1,6 @@
 {
   "name": "dsh-meeting-memo",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Meeting minutes in the right sidebar: local capture, transcription, and structured minutes.",
   "type": "module",
   "main": "./lib/index.js",
@@ -44,7 +44,7 @@
     "build": "node ./scripts/build-host.mjs && node ./scripts/build-client.mjs",
     "build:host": "node ./scripts/build-host.mjs",
     "build:client": "node ./scripts/build-client.mjs",
-    "check:client": "node ./scripts/check-client.mjs",
+    "check:client": "node --experimental-strip-types scripts/check-client.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "prepare": "npm run build",
     "check:mobile": "node selftest-mobile.mjs",

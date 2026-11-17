@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots/client'
 
 import { Panel } from './panel.tsx'
 import { createRpc } from './rpc.ts'
+import { demoResponse } from './demo.ts'
 import { NS, en, zh } from './labels.ts'
 
 /** Tab implementation identity; also the keyed dispatch key for the body. */
@@ -36,7 +37,7 @@ export function apply(ctx: Context): void {
     }],
   }), 'meeting-minutes: tab type')
 
-  const rpc = createRpc()
+  const rpc = createRpc(undefined, demoResponse)
 
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
     name: 'sidebar.right.pane.tab',

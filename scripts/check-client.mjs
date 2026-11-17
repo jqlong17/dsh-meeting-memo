@@ -140,12 +140,14 @@ for (const needle of ['会议纪要', '关于', '复制这段话', 'AI 生成纪
 
 // 7. 真跑一遍组件体：hooks 是桩，但渲染期引用错误会在这里炸出来。
 const panel = calls.slots[0]?.component ?? calls.tabs.find((entry) => entry.component)?.component
+let panelProps = null
 if (typeof panel === 'function') {
   const props = {
     rpc: async () => ({ ok: false, error: { code: 'stub', message: 'stub' } }),
     t: (key) => dictionaries.zh[key] ?? key,
     sessionId: 'stub',
   }
+  panelProps = props
   let threw = null
   try {
     panel(props)
@@ -156,3 +158,25 @@ if (typeof panel === 'function') {
 }
 
 console.log('[check-client] ok — tab, body, locale and copy verified')
+
+// 8. 演示模式：用夹具数据再渲染一遍，确保六个页面的数据形态不会炸。
+try {
+  const demo = await import('../src/client/demo.ts')
+  demo.setDemoActive(true)
+  const demoRpc = async (op, payload) => demo.demoResponse(op, payload) ?? { ok: false, error: { code: 'stub', message: 'stub' } }
+  let demoThrew = null
+  try {
+    panel(panelProps && { ...panelProps, rpc: demoRpc })
+  } catch (error) {
+    demoThrew = error
+  }
+  assert.equal(demoThrew, null, `demo render threw: ${demoThrew && demoThrew.message}`)
+  demo.setDemoActive(false)
+  console.log('[check-client] ok — demo fixtures render')
+} catch (error) {
+  if (error && error.code === 'ERR_MODULE_NOT_FOUND') {
+    console.log('[check-client] skip demo render (需要 --experimental-strip-types)')
+  } else {
+    throw error
+  }
+}

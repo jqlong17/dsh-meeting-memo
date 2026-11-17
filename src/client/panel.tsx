@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 
+import { isDemoActive, setDemoActive } from './demo.ts'
 import type { AsrModelsPayload, AsrStatusDTO, MinutesRangeDTO, UpdateStatusDTO, SpeakerPayload, BackgroundCardDTO, BackgroundsPayload, DayPayload, JobDTO, MemorySampleDTO, MinuteSessionDTO, MinutesOverview, MinutesPayload, ModelOfferDTO, SkillsPayload } from '../types.ts'
 import type { RpcCall, RpcError } from './rpc.ts'
 import { buildIndexCopy } from '../copy-index.ts'
@@ -288,6 +289,7 @@ export function Panel(props: PanelProps) {
     return 150
   })
 
+  const [demoMode, setDemoMode] = useState(() => isDemoActive())
   const [update, setUpdate] = useState<UpdateStatusDTO | null>(null)
   const [updateHidden, setUpdateHidden] = useState(false)
   const [updating, setUpdating] = useState(false)
@@ -1510,6 +1512,34 @@ export function Panel(props: PanelProps) {
         </div>
 
         <div style={{ ...cardStyle }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.demo.title')}</span>
+            <span style={{ flex: '1 1 auto' }} />
+            <button
+              type="button"
+              style={demoMode ? { ...buttonStyle, borderColor: WARN, color: WARN } : primaryButtonStyle}
+              onClick={() => {
+                const next = !demoMode
+                setDemoActive(next)
+                setDemoMode(next)
+                // 切换后清掉缓存，让六个页面重新取数（演示模式取夹具）
+                setData(null)
+                setMinutes(null)
+                setMinutesRange(null)
+                setExpandedMinute(null)
+                void loadDay(undefined, true)
+                void loadJobs()
+                void loadSkills()
+                if (next) void loadSpeaker()
+              }}
+            >
+              {demoMode ? t('panel.demo.exit') : t('panel.demo.enter')}
+            </button>
+          </div>
+          <div style={{ ...smallStyle, lineHeight: 1.6 }}>{t('panel.demo.hint')}</div>
+        </div>
+
+        <div style={{ ...cardStyle }}>
           <div style={{ fontSize: FS.sm, fontWeight: 600, marginBottom: 6 }}>{t('panel.about.meta')}</div>
           {rows.map((row) => (
             <div key={row.key} style={{ display: 'grid', gridTemplateColumns: '72px minmax(0, 1fr)', columnGap: 8, marginTop: 5, fontSize: FS.xs, lineHeight: 1.5 }}>
@@ -2444,7 +2474,37 @@ export function Panel(props: PanelProps) {
           </div>
         ) : null}
       </div>
-      {(update?.hasUpdate || update?.appliedVersion) && !updateHidden ? (
+      {demoMode ? (
+        <div style={{
+          flex: '0 0 auto',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          margin: '0 10px 6px',
+          padding: '5px 8px',
+          border: `1px solid ${WARN}`,
+          borderRadius: RADIUS,
+          background: BG2,
+          flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: FS.xs, fontWeight: 600, color: WARN }}>{t('panel.demo.banner')}</span>
+          <span style={smallStyle}>{t('panel.demo.bannerHint')}</span>
+          <span style={{ flex: '1 1 auto' }} />
+          <button
+            type="button"
+            style={{ ...buttonStyle, borderColor: WARN, color: WARN }}
+            onClick={() => {
+              setDemoActive(false)
+              setDemoMode(false)
+              setData(null)
+              setMinutes(null)
+              setMinutesRange(null)
+            }}
+          >
+            {t('panel.demo.exit')}
+          </button>
+        </div>
+      ) : (update?.hasUpdate || update?.appliedVersion) && !updateHidden ? (
         <div style={{
           flex: '0 0 auto',
           display: 'flex',
