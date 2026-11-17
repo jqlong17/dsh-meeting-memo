@@ -1525,13 +1525,6 @@ export function Panel(props: PanelProps) {
         </div>
 
         <div style={{ flex: '0 0 auto', padding: '0 10px 6px', display: 'flex', gap: 6, alignItems: 'center', borderBottom: `1px solid ${BORDER}` }}>
-          {/* 轨道筛选放最左，和「今日」页的位置一致 */}
-          {(['all', 'mic', 'system'] as const).map((key) => (
-            <button key={key} type="button" style={chipStyle(spkTrack === key)} onClick={() => setSpkTrack(key)}>
-              {t(`panel.speaker.trackFilter.${key}`)}
-            </button>
-          ))}
-          <span style={{ width: 8 }} />
           <button type="button" style={chipStyle(spkView === 'tag')} onClick={() => setSpkView('tag')}>{t('panel.speaker.viewTag')}</button>
           <button type="button" style={chipStyle(spkView === 'saved')} onClick={() => setSpkView('saved')}>
             {t('panel.speaker.viewSaved')} {speaker?.total ? ` ${speaker.total}` : ''}
@@ -1575,6 +1568,16 @@ export function Panel(props: PanelProps) {
               ) : null}
               {renderNotices()}
               <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.5 }}>{t('panel.speaker.hint')}</div>
+            </div>
+
+            {/* 轨道筛选：放在打标模块下方，紧贴要筛选的列表 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '8px 0 2px' }}>
+              {(['all', 'mic', 'system'] as const).map((key) => (
+                <button key={key} type="button" style={chipStyle(spkTrack === key)} onClick={() => setSpkTrack(key)}>
+                  {t(`panel.speaker.trackFilter.${key}`)}
+                </button>
+              ))}
+              <span style={{ ...smallStyle, marginLeft: 4 }}>{rows.length} {t('panel.speaker.trackCount')}</span>
             </div>
 
             {rows.length === 0 ? (
