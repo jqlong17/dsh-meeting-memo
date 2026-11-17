@@ -23,7 +23,7 @@ import { ModelDownloads } from './model-download.ts'
 import { defaultDownloadRoot, offerMatches, offersForPlatform } from './model-catalog.ts'
 import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
-import { addLabel, deleteLabel, groupByDay, readLabels } from './speaker-labels.ts'
+import { addLabel, deleteLabel, groupByDay, readLabels, removeLabelLine } from './speaker-labels.ts'
 import { readDayMap, listDays, writeDay } from './speaker-assignments.ts'
 import { readEmbMap } from './emb-store.ts'
 import { backfillLabel } from './speaker-backfill.ts'
@@ -609,6 +609,58 @@ async function dispatch(
         named: new Set([...named.values()]).size,
         names: [...new Set([...named.values()])],
       }
+    }
+    case 'speaker.labelLines': {
+      // 展开一条标注，看它到底覆盖了哪几句（按时间正序，便于核对）
+      const day = String(payload.day || '')
+      const labelId = String(payload.labelId || '')
+      const label = readLabels(service.config.home).find((item) => item.id === labelId)
+      if (!label) throw new MeetingError('NO_LABEL', '标注不存在')
+      const dir = path.join(service.config.home, 'asr-log', day)
+      let text = ''
+      try {
+        text = readFileSync(path.join(dir, 'snippets.jsonl'), 'utf8')
+      } catch {
+        throw new MeetingError('NO_LOG', '当天还没有转写')
+      }
+      const wanted = new Set(label.lines ?? [])
+      const assignments = readDayMap(service.config.home, day)
+      const lines: Array<{ line: number; startAt: string; track: string; text: string; speaker?: string }> = []
+      let index = 0
+      for (const raw of text.split('\n')) {
+        if (!raw.trim()) continue
+        index += 1
+        if (!wanted.has(index)) continue
+        try {
+          const row = JSON.parse(raw) as { startAt?: string; track?: string; text?: string }
+          const assigned = assignments[String(index)]
+          lines.push({
+            line: index,
+            startAt: String(row.startAt ?? ''),
+            track: String(row.track ?? 'mic'),
+            text: String(row.text ?? ''),
+            ...(assigned?.name ? { speaker: assigned.name } : {}),
+          })
+        } catch {
+          // 坏行跳过
+        }
+      }
+      return { day, labelId, label: label.label, lines }
+    }
+    case 'speaker.labelRemoveLine': {
+      // 摘掉某一句：既从标注里删掉，也清掉它的归属，避免还挂着错名字
+      const day = String(payload.day || '')
+      const labelId = String(payload.labelId || '')
+      const line = Number(payload.line)
+      if (!Number.isFinite(line) || line <= 0) throw new MeetingError('BAD_LINE', '行号不合法')
+      const rest = removeLabelLine(service.config.home, labelId, line)
+      const map = readDayMap(service.config.home, day)
+      if (map[String(line)]) {
+        delete map[String(line)]
+        writeDay(service.config.home, day, map)
+        service.invalidateSpeakerCache()
+      }
+      return { removed: line, remaining: rest?.lines?.length ?? 0, deleted: rest === null }
     }
     case 'speaker.list': {
       const items = readLabels(service.config.home)

@@ -150,6 +150,13 @@ const inputStyle: CSSProperties = {
   boxSizing: 'border-box',
 }
 
+/** ISO 时间 → 当天第几分钟（本地时区）。 */
+function minuteOfDay(iso: string): number {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 0
+  return date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60
+}
+
 function clock(minute: number, withSeconds = false): string {
   const total = Math.max(0, Math.round(minute * 60))
   const hh = Math.floor(total / 3600) % 24
@@ -277,6 +284,37 @@ export function Panel(props: PanelProps) {
   const [spkNote, setSpkNote] = useState('')
   const [spkView, setSpkView] = useState<'tag' | 'saved'>('tag')
   const [spkPicked, setSpkPicked] = useState<string[]>([])
+  const [openLabel, setOpenLabel] = useState<string | null>(null)
+  const [labelLines, setLabelLines] = useState<Record<string, Array<{ line: number; startAt: string; track: string; text: string; speaker?: string }>>>({})
+
+  const toggleLabel = async (item: { id: string; day: string }) => {
+    if (openLabel === item.id) {
+      setOpenLabel(null)
+      return
+    }
+    setOpenLabel(item.id)
+    const result = await rpc<{ lines: Array<{ line: number; startAt: string; track: string; text: string; speaker?: string }> }>(
+      'speaker.labelLines', { day: item.day, labelId: item.id },
+    )
+    if (result.ok) setLabelLines((previous) => ({ ...previous, [item.id]: result.value.lines }))
+  }
+
+  const removeLine = async (item: { id: string; day: string }, line: number) => {
+    const result = await rpc<{ remaining: number; deleted: boolean }>('speaker.labelRemoveLine', { day: item.day, labelId: item.id, line })
+    if (!result.ok) {
+      setNoticeError(result.error.message)
+      return
+    }
+    setLabelLines((previous) => ({
+      ...previous,
+      [item.id]: (previous[item.id] ?? []).filter((row) => row.line !== line),
+    }))
+    setNotice(t('panel.speaker.lineRemoved'))
+    void loadSpeaker()
+    void loadAssign(item.day)
+    if (result.value.deleted) setOpenLabel(null)
+  }
+
   const [spkTrack, setSpkTrack] = useState<'all' | 'mic' | 'system'>('all')
   const [assign, setAssign] = useState<Record<string, { speaker: string; name?: string; track: string }>>({})
   const loadAssignRef = useRef<(day: string) => Promise<void>>(async () => {})
@@ -1646,6 +1684,33 @@ export function Panel(props: PanelProps) {
                       </button>
                     </div>
                     {item.note ? <div style={{ ...smallStyle, marginTop: 3 }}>{item.note}</div> : null}
+                    <div style={{ ...smallStyle, marginTop: 4 }}>
+                      <button type="button" style={{ ...buttonStyle, padding: '1px 6px' }} onClick={() => void toggleLabel(item)}>
+                        {openLabel === item.id ? t('panel.speaker.collapseLines') : t('panel.speaker.expandLines')}
+                      </button>
+                    </div>
+                    {openLabel === item.id ? (
+                      <div style={{ marginTop: 6, borderTop: `1px solid ${BORDER}`, paddingTop: 4 }}>
+                        {(labelLines[item.id] ?? []).length === 0 ? (
+                          <div style={smallStyle}>{t('panel.speaker.noLines')}</div>
+                        ) : (labelLines[item.id] ?? []).map((row) => (
+                          <div key={row.line} style={{ display: 'grid', gridTemplateColumns: '62px 44px minmax(0, 1fr) auto', columnGap: 8, padding: '3px 0', borderBottom: `1px solid ${BORDER}`, alignItems: 'start' }}>
+                            <span style={{ fontFamily: MONO, fontSize: FS.xs, color: CAPTION, fontVariantNumeric: 'tabular-nums' }}>
+                              {clock(minuteOfDay(row.startAt), true)}
+                            </span>
+                            <span style={{ fontSize: FS.xs, color: trackColor(row.track) }}>{trackName(row.track, t)}</span>
+                            <span style={{ fontSize: FS.xs, lineHeight: '17px', wordBreak: 'break-word' }}>{row.text}</span>
+                            <button
+                              type="button"
+                              style={{ ...buttonStyle, padding: '0 6px', fontSize: FS.xs, color: DANGER }}
+                              onClick={() => void removeLine(item, row.line)}
+                            >
+                              {t('panel.speaker.deleteLine')}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>

@@ -101,6 +101,28 @@ export function deleteLabel(home: string, id: string): SpeakerLabel[] {
 }
 
 /** 日期归档：按天分组，新的在前。 */
+
+/**
+ * 从一条标注里摘掉某一句。
+ * 句子删空就把整条标注删掉；返回剩下的标注（或 null 表示已删除）。
+ */
+export function removeLabelLine(home: string, labelId: string, line: number): SpeakerLabel | null {
+  const items = readLabels(home)
+  const index = items.findIndex((item) => item.id === labelId)
+  if (index < 0) return null
+  const item = items[index]
+  const rest = (item.lines ?? []).filter((value) => value !== line)
+  if (!rest.length) {
+    items.splice(index, 1)
+    writeAll(home, items)
+    return null
+  }
+  const next: SpeakerLabel = { ...item, lines: rest }
+  items[index] = next
+  writeAll(home, items)
+  return next
+}
+
 export function groupByDay(items: SpeakerLabel[]): Array<{ day: string; items: SpeakerLabel[] }> {
   const map = new Map<string, SpeakerLabel[]>()
   for (const item of items) {
