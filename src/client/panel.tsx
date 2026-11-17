@@ -857,6 +857,34 @@ export function Panel(props: PanelProps) {
     void loadDayRef.current(dayRef.current || undefined)
   }
 
+  const [rebuilding, setRebuilding] = useState(false)
+
+  /** 用已登记的声纹把当天整天的转写重判一遍；今日页读同一份分配，所以一起生效。 */
+  const rebuildSpeakers = async () => {
+    if (!data) return
+    setRebuilding(true)
+    setNoticeError('')
+    try {
+      const result = await rpc<{ day: string; withEmbedding: number; matched: number; names: Record<string, number>; enrolled: number }>(
+        'speaker.rebuild', { day: data.day },
+      )
+      if (!result.ok) {
+        setNoticeError(result.error.hint ? `${result.error.message} · ${result.error.hint}` : result.error.message)
+        return
+      }
+      const value = result.value
+      const parts = Object.entries(value.names).map(([name, count]) => `${name} ${count}`).join('、')
+      setNotice(t('panel.speaker.rebuilt')
+        .replace('{m}', String(value.matched))
+        .replace('{t}', String(value.withEmbedding))
+        .replace('{e}', String(value.enrolled))
+        + (parts ? ` · ${parts}` : ''))
+      void loadAssign(value.day)
+    } finally {
+      setRebuilding(false)
+    }
+  }
+
   const enrollRecent = async () => {
     const name = spkLabel.trim()
     if (!name) {
@@ -1425,6 +1453,14 @@ export function Panel(props: PanelProps) {
                 </button>
                 <button type="button" style={buttonStyle} onClick={() => void enrollRecent()}>
                   {t('panel.speaker.enrollRecent')}
+                </button>
+                <button
+                  type="button"
+                  style={{ ...buttonStyle, borderColor: ACCENT, color: ACCENT }}
+                  disabled={rebuilding}
+                  onClick={() => void rebuildSpeakers()}
+                >
+                  {rebuilding ? t('panel.speaker.rebuilding') : t('panel.speaker.rebuild')}
                 </button>
               </div>
               {spkPicked.length ? (

@@ -250,6 +250,57 @@ async function dispatch(
       const wanted = typeof payload.day === 'string' && payload.day ? payload.day : undefined
       return wanted ? { day: wanted, map: days[wanted] ?? {} } : { days }
     }
+    case 'speaker.rebuild': {
+      const day = service.dayPayload(typeof payload.day === 'string' && payload.day ? payload.day : undefined).day
+      const file = path.join(service.config.home, 'asr-log', day, 'snippets.jsonl')
+      let text = ''
+      try {
+        text = readFileSync(file, 'utf8')
+      } catch {
+        throw new MeetingError('NO_LOG', '当天还没有转写')
+      }
+      const rows = parseRows(text)
+      const labels = readLabels(service.config.home)
+      if (!labels.length) {
+        throw new MeetingError('NO_LABELS', '还没有登记任何说话人', '先去「说话人识别 → 打标」登记几句，再回来重算')
+      }
+      // 每种「轨道|设备」各建一套质心；麦克风跨设备声纹会掉分，不能混
+      const sets = new Map<string, CentroidSet>()
+      for (const scope of neededScopes(rows)) {
+        const built = buildCentroids(
+          path.join(service.config.home, 'asr-log'),
+          labels,
+          service.config.home,
+          scope.track === 'mic' ? scope.device : undefined,
+          scope.track,
+        )
+        sets.set(centroidKey(scope.track, scope.device), built)
+      }
+      const result = rebuildAssignments({
+        rows,
+        centroidSets: sets,
+        decode: decodeEmbedding,
+      })
+      // 旧归属整体替换：没声纹的行保留原值，其余以本次判定为准
+      const days = readAssignments(service.config.home)
+      const previous = days[day] ?? {}
+      const next: typeof previous = {}
+      const evaluated = new Set(rows.filter((row) => row.emb).map((row) => String(row.line)))
+      for (const [line, entry] of Object.entries(previous)) {
+        if (!evaluated.has(line)) next[line] = entry
+      }
+      for (const [line, entry] of Object.entries(result.map)) next[line] = entry
+      days[day] = next
+      writeAssignments(service.config.home, days)
+      return {
+        day,
+        rows: rows.length,
+        withEmbedding: result.total,
+        matched: result.matched,
+        names: result.names,
+        enrolled: new Set(labels.map((label) => label.label)).size,
+      }
+    }
     case 'speaker.analyze': {
       const payloadDay = typeof payload.day === 'string' && payload.day ? payload.day : undefined
       const day = service.dayPayload(payloadDay)
