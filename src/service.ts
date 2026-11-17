@@ -706,7 +706,17 @@ export class MeetingService {
 
 
   /** 说话人分配按行号存在旁边，读一次缓存当天结果。 */
-  private speakerCache: { day: string; map: Record<string, { name?: string; score?: number }> } | null = null
+  private speakerCache: {
+    day: string
+    map: Record<string, { name?: string; score?: number }>
+    /** 当天有没有归属表：有就以表为准，表里没有这一行就是「不认识」。 */
+    authoritative: boolean
+  } | null = null
+
+  /** 重算或改标之后要让缓存失效，否则还会拿旧的名字。 */
+  invalidateSpeakerCache(): void {
+    this.speakerCache = null
+  }
 
   /** 返回「名字(相似度)」，拿不到名字就 undefined；大模型靠它判断谁说的、有多确信。 */
   speakerOf(day: string, segment: { line?: number; lines?: number[]; speaker?: string; speakerScore?: number }): string | undefined {
@@ -715,12 +725,18 @@ export class MeetingService {
     let score = segment.speakerScore
     if (day && line) {
       if (!this.speakerCache || this.speakerCache.day !== day) {
-        this.speakerCache = { day, map: readAssignments(this.config.home)[day] ?? {} }
+        const days = readAssignments(this.config.home)
+        this.speakerCache = { day, map: days[day] ?? {}, authoritative: Boolean(days[day]) }
       }
       const entry = this.speakerCache.map[String(line)]
       if (entry?.name) {
         name = entry.name
         score = entry.score ?? score
+      } else if (this.speakerCache.authoritative) {
+        // 当天有归属表却没这一行：说明重判过并且判定为「不认识」。
+        // 这里绝不能再回退到正文里的旧快照，否则「重算清空」等于没生效。
+        name = undefined
+        score = undefined
       }
     }
     if (!name) return undefined

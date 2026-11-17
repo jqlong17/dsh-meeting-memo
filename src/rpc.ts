@@ -406,6 +406,7 @@ async function dispatch(
       for (const [line, entry] of Object.entries(result.map)) next[line] = entry
       days[day] = next
       writeAssignments(service.config.home, days)
+      service.invalidateSpeakerCache()
       return {
         day,
         rows: rows.length,
