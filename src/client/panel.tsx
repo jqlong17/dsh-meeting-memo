@@ -3214,9 +3214,24 @@ function HeartbeatChart({ points, summary, range, t }: {
         ) : null}
       </div>
       <div style={{ ...smallStyle, marginTop: 4, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span style={{ color: SUCCESS }}>{t('panel.asr.hb.legend.ok')} {summary.ok}</span>
-        <span>{t('panel.asr.hb.legend.idle')} {summary.idle}</span>
-        <span style={{ color: DANGER }}>{t('panel.asr.hb.legend.gap')} {summary.gap}</span>
+        {/* 没有断点就直接给一句「全时段正常」，比列三个数字更不容易看错 */}
+        {summary.gap === 0 ? (
+          <>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: SUCCESS, fontWeight: 600 }}>
+              <span style={{ width: 6, height: 6, borderRadius: RADIUS_PILL, background: SUCCESS }} />
+              {t('panel.asr.hb.allGood')}
+            </span>
+            <span style={{ color: CAPTION }}>
+              {t('panel.asr.hb.legend.ok')} {summary.ok} · {t('panel.asr.hb.legend.idle')} {summary.idle}
+            </span>
+          </>
+        ) : (
+          <>
+            <span style={{ color: SUCCESS }}>{t('panel.asr.hb.legend.ok')} {summary.ok}</span>
+            <span>{t('panel.asr.hb.legend.idle')} {summary.idle}</span>
+            <span style={{ color: DANGER, fontWeight: 600 }}>{t('panel.asr.hb.legend.gap')} {summary.gap}</span>
+          </>
+        )}
         {zoom ? (
           <button type="button" style={{ ...buttonStyle, marginLeft: 'auto' }} onClick={() => setZoom(null)}>
             {t('panel.asr.mem.resetZoom')}
