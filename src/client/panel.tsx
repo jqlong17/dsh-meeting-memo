@@ -4,7 +4,7 @@
  * Every read goes through the injected `rpc` face; the bundle only requires
  * `react`. Styles use Host design tokens, so light/dark follow the app theme.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 
 import { isDemoActive, setDemoActive } from './demo.ts'
@@ -2912,7 +2912,11 @@ function trackColor(track: string): string {
   return 'var(--dsw-alias-chart-messages)'
 }
 
-/** 当天 00:00–24:00 的内存曲线；点来自每分钟落盘的样本。 */
+/**
+ * 当天 00:00–24:00 的内存曲线，按分类堆叠：
+ * 程序堆 / 音频缓冲 / 固定开销，叠起来就是常驻占用。
+ * 映射的模型文件（可回收）不参与堆叠，单独一条虚线画在下面，避免把其他分类压扁。
+ */
 function MemoryTimeline({ samples, day, t }: {
   samples: MemorySampleDTO[]
   day: Array<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }>
@@ -2922,29 +2926,58 @@ function MemoryTimeline({ samples, day, t }: {
   const latest = day.at(-1)
   const width = 560
   const height = 96
-  const used = (point: { occupied: number }): number => point.occupied || 0
-  const values = day.map(used)
-  const max = Math.max(1, ...values)
+  const pad = 6
+  const stacks = [
+    { key: 'heap' as const, color: 'var(--dsw-alias-chart-messages)' },
+    { key: 'audio' as const, color: 'var(--dsw-alias-chart-audio)' },
+    { key: 'fixed' as const, color: FG2 },
+  ]
+  const totals = day.map((point) => stacks.reduce((sum, part) => sum + (point[part.key] || 0), 0))
+  const max = Math.max(1, ...totals)
   const xAt = (minute: number): number => (Math.min(1440, Math.max(0, minute)) / 1440) * width
-  const yAt = (value: number): number => height - 6 - (value / max) * (height - 14)
-  const line = day.length
-    ? `M${day.map((point) => `${xAt(point.minute).toFixed(1)},${yAt(used(point)).toFixed(1)}`).join(' L')}`
-    : ''
-  const area = day.length ? `${line} L${xAt(day.at(-1)!.minute).toFixed(1)},${height} L${xAt(day[0].minute).toFixed(1)},${height} Z` : ''
+  const yAt = (value: number): number => height - pad - (value / max) * (height - pad * 2)
+
+  // 逐层累加：第 i 层的上边界是前 i 层之和
+  const bands = (() => {
+    let running = day.map(() => 0)
+    const out: Array<{ path: string; color: string }> = []
+    for (const part of stacks) {
+      const lower = running.slice()
+      running = running.map((value, index) => value + (day[index][part.key] || 0))
+      const upper = running.slice()
+      if (!day.length) break
+      const top = day.map((point, index) => `${xAt(point.minute).toFixed(1)},${yAt(upper[index]).toFixed(1)}`)
+      const bottom = day.map((point, index) => `${xAt(point.minute).toFixed(1)},${yAt(lower[index]).toFixed(1)}`).reverse()
+      out.push({ path: `M${top.join(' L')} L${bottom.join(' L')} Z`, color: part.color })
+    }
+    return out
+  })()
+
   const ticks = [0, 360, 720, 1080, 1440]
-  const hours = t('panel.asr.mem.hours')
+  const totalLabel = latest
+    ? formatBytes(stacks.reduce((sum, part) => sum + (latest[part.key] || 0), 0), true)
+    : latestStatus ? formatBytes(latestStatus.occupied ?? latestStatus.footprint, true) : '—'
+
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
         <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.asr.foot')}</span>
-        <span style={{ fontFamily: MONO, fontSize: FS.num, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>
-          {latest ? formatBytes(latest.occupied, true) : latestStatus ? formatBytes(latestStatus.occupied ?? latestStatus.footprint, true) : '—'}
-        </span>
-        <span style={{ ...smallStyle, marginLeft: 'auto', color: FG2 }}>{hours}</span>
+        <span style={{ fontFamily: MONO, fontSize: FS.num, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>{totalLabel}</span>
+        <span style={{ ...smallStyle, marginLeft: 'auto', color: FG2 }}>{t('panel.asr.mem.hours')}</span>
       </div>
       <svg viewBox={`0 0 ${width} ${height + 14}`} width="100%" height={height + 14} role="img" style={{ display: 'block', marginTop: 4, background: SURFACE_SOFT, borderRadius: RADIUS_CHIP }}>
-        {area ? <path d={area} fill={ACCENT} opacity={0.1} /> : null}
-        {line ? <path d={line} fill="none" stroke={ACCENT} strokeWidth={2} vectorEffect="non-scaling-stroke" /> : null}
+        {bands.map((band, index) => (
+          <path key={index} d={band.path} fill={band.color} opacity={0.45} stroke={band.color} strokeWidth={1} strokeOpacity={0.7} />
+        ))}
+        {latest && latest.mapped > 0 ? (
+          <path
+            d={day.map((point, index) => `${index === 0 ? 'M' : 'L'}${xAt(point.minute).toFixed(1)},${(height - pad * 2).toFixed(1)}`).join(' ')}
+            fill="none"
+            stroke={BORDER}
+            strokeWidth={2}
+            strokeDasharray="4 3"
+          />
+        ) : null}
         {ticks.map((minute) => (
           <text key={minute} x={xAt(minute)} y={height + 11} fontSize={9} fill={CAPTION} textAnchor={minute === 0 ? 'start' : minute === 1440 ? 'end' : 'middle'}>
             {String(Math.floor(minute / 60)).padStart(2, '0')}:00
@@ -2953,15 +2986,13 @@ function MemoryTimeline({ samples, day, t }: {
       </svg>
       {latest ? (
         <div style={{ display: 'grid', gridTemplateColumns: '8px 72px 72px', columnGap: 8, alignItems: 'center', marginTop: 4, fontSize: FS.xs }}>
-          <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: 'var(--dsw-alias-chart-audio)' }} />
-          <span>{t('panel.asr.mem.audio')}</span>
-          <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest.audio, true)}</span>
-          <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: 'var(--dsw-alias-chart-messages)' }} />
-          <span>{t('panel.asr.mem.heap')}</span>
-          <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest.heap, true)}</span>
-          <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: FG2 }} />
-          <span>{t('panel.asr.mem.fixed')}</span>
-          <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest.fixed, true)}</span>
+          {stacks.map((part) => (
+            <Fragment key={part.key}>
+              <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: part.color }} />
+              <span>{t(`panel.asr.mem.${part.key}`)}</span>
+              <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatBytes(latest[part.key], true)}</span>
+            </Fragment>
+          ))}
           <span style={{ width: 8, height: 8, borderRadius: RADIUS_PILL, background: BORDER }} />
           <span>{t('panel.asr.mem.mapped')}</span>
           <span style={{ fontFamily: MONO, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: 0.7 }}>{formatBytes(latest.mapped, true)}</span>
