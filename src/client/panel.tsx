@@ -1420,7 +1420,18 @@ export function Panel(props: PanelProps) {
               style={buttonStyle}
               onClick={() => { setSpkStart(null); setSpkEnd(null) }}
             >{t('panel.speaker.reset')}</button>
+            <span style={{ flex: '1 1 auto' }} />
+            <button
+              type="button"
+              style={{ ...buttonStyle, borderColor: ACCENT, color: ACCENT }}
+              disabled={rebuilding}
+              title={t('panel.speaker.rebuildHint')}
+              onClick={() => void rebuildSpeakers()}
+            >
+              {rebuilding ? t('panel.speaker.rebuilding') : t('panel.speaker.rebuild')}
+            </button>
           </div>
+          <div style={{ ...smallStyle, marginBottom: 6, lineHeight: 1.5 }}>{t('panel.speaker.rebuildHint')}</div>
         </div>
 
         <div style={{ flex: '0 0 auto', padding: '0 10px 6px', display: 'flex', gap: 6, alignItems: 'center', borderBottom: `1px solid ${BORDER}` }}>
@@ -1453,15 +1464,6 @@ export function Panel(props: PanelProps) {
                 </button>
                 <button type="button" style={buttonStyle} onClick={() => void enrollRecent()}>
                   {t('panel.speaker.enrollRecent')}
-                </button>
-                <button
-                  type="button"
-                  style={{ ...buttonStyle, borderColor: ACCENT, color: ACCENT }}
-                  disabled={rebuilding}
-                  title={t('panel.speaker.rebuildHint')}
-                  onClick={() => void rebuildSpeakers()}
-                >
-                  {rebuilding ? t('panel.speaker.rebuilding') : t('panel.speaker.rebuild')}
                 </button>
               </div>
               {spkPicked.length ? (
