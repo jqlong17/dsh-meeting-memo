@@ -527,9 +527,21 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 5, repeating: 5)
         timer.setEventHandler { [weak self] in
-            guard let self, self.engine != nil else { return }
+            guard let self else { return }
+            // 引擎根本没起来（上次启动失败、设备被占用）：直接再试，别一直停在「未开启」
+            if self.engine == nil {
+                self.startMic()
+                emit(["type": "status", "phase": "running", "mic": self.engine != nil, "system": self.stream != nil, "input": self.inputName])
+                return
+            }
+            // 系统音流没起来也补一次（受权限/显示器状态影响）
+            if self.stream == nil {
+                self.startSystem()
+                emit(["type": "status", "phase": "running", "mic": self.engine != nil, "system": self.stream != nil, "input": self.inputName])
+                return
+            }
             // 引擎在跑却 10 秒没有任何样本：多半是拔插耳机或设备切换后触点停了
-            if self.engine != nil, Date().timeIntervalSince(self.lastMicBufferAt) > 10 {
+            if Date().timeIntervalSince(self.lastMicBufferAt) > 10 {
                 emit(["type": "warn", "track": "mic", "message": "麦克风没有样本回流，正在重建采集"])
                 self.restartMic()
                 self.lastMicBufferAt = Date()
