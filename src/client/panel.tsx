@@ -340,7 +340,7 @@ export function Panel(props: PanelProps) {
     }
   }
 
-  const [hbRange, setHbRange] = useState<'minute' | 'hour' | 'day'>('minute')
+  const [hbRange, setHbRange] = useState<'minute' | 'hour' | 'day'>('hour')
   const [hbDay, setHbDay] = useState<{ points: Array<{ minute: number; state: 'ok' | 'idle' | 'gap'; speech: number; snippets: number }>; summary: { total: number; ok: number; idle: number; gap: number } } | null>(null)
 
   const loadHeartbeatDay = useCallback(async (range: 'minute' | 'hour' | 'day') => {
@@ -355,7 +355,7 @@ export function Panel(props: PanelProps) {
     const timer = window.setInterval(() => { void loadHeartbeatDay(hbRange) }, 60_000)
     return () => window.clearInterval(timer)
   }, [tab, loadHeartbeatDay, hbRange])
-  const [memoryRange, setMemoryRange] = useState<'minute' | 'hour' | 'day'>('minute')
+  const [memoryRange, setMemoryRange] = useState<'minute' | 'hour' | 'day'>('hour')
 
   const loadMemoryDay = useCallback(async (range: 'minute' | 'hour' | 'day') => {
     const result = await rpc<{ day: string; samples: Array<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }> }>('asr.memory', { range })
