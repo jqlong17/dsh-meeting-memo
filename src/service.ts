@@ -84,14 +84,20 @@ function defaultSelection(day: string, today: string, timeZone: string, data: Da
   const lastSegment = data.segments.length ? data.segments[data.segments.length - 1].e : 0
   const last = Math.max(lastBucket, lastSegment)
   const isToday = day === today
-  let end: number
-  if (isToday) end = Math.max(nowMinuteOfDay(timeZone), config.windowStart + 60)
-  else if (last > 0) end = last
-  else end = config.windowStart + 120
-  end = Math.ceil(end / 5) * 5
-  end = Math.max(config.windowStart + 60, Math.min(config.windowEnd, end))
-  const start = Math.max(config.windowStart, end - 120)
-  return clampSelection(start, end, config)
+  const nowMinute = nowMinuteOfDay(timeZone)
+  // 默认整天空闲预览：当天且还没到中午时数据太少，先给最近 2 小时；其余情况直接 00:00–24:00
+  if (isToday && nowMinute < 12 * 60) {
+    let end = Math.ceil(Math.max(nowMinute, config.windowStart + 60) / 5) * 5
+    end = Math.max(config.windowStart + 60, Math.min(config.windowEnd, end))
+    return clampSelection(Math.max(config.windowStart, end - 120), end, config)
+  }
+  if (isToday) return clampSelection(config.windowStart, config.windowEnd, config)
+  // 历史日期：有数据就框到最后一条，否则给个两小时的初始框
+  if (last > 0) {
+    const end = Math.max(config.windowStart + 60, Math.min(config.windowEnd, Math.ceil(last / 5) * 5))
+    return clampSelection(Math.max(config.windowStart, end - 120), end, config)
+  }
+  return clampSelection(config.windowStart, config.windowStart + 120, config)
 }
 
 function toSegmentDTO(segment: { s: number; e: number; track: string; text: string; source?: string; line?: number }): SegmentDTO {

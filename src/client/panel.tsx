@@ -935,10 +935,16 @@ export function Panel(props: PanelProps) {
   const speakerRange = () => {
     const now = clockNow()
     const last = data ? Math.max(lastDataMinute(data), data.window.start) : now
-    const fallbackStart = Math.max(data?.window.start ?? 0, last - 120)
+    const isToday = Boolean(data && data.day === data.today)
+    const windowStart = data?.window.start ?? 0
+    const windowEnd = data?.window.end ?? 1440
+    // 默认跟「今日」一致：整天；当天还没到中午时先给最近 2 小时（那会儿数据太少）
+    const early = isToday && now < 12 * 60
+    const fallbackStart = early ? Math.max(windowStart, last - 120) : windowStart
+    const fallbackEnd = early ? Math.max(now, last, fallbackStart + 1) : windowEnd
     return {
       start: spkStart ?? fallbackStart,
-      end: spkEnd ?? Math.max(now, last, fallbackStart + 1),
+      end: spkEnd ?? fallbackEnd,
     }
   }
 
