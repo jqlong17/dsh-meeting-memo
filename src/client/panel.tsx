@@ -880,7 +880,7 @@ export function Panel(props: PanelProps) {
     const from = Math.min(start, end)
     const to = Math.max(start, end)
     const rows = (data?.segments ?? []).filter((segment) => (
-      segment.e > from && segment.s < to && (track === 'all' || segment.track === track)
+      segment.e > from && segment.s < to && (spkTrack === 'all' || segment.track === spkTrack)
     ))
     setSpkPicked(rows.map((segment) => rowKey(segment)))
   }
