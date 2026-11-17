@@ -848,6 +848,9 @@ export function Panel(props: PanelProps) {
       return
     }
     setJobs((previous) => [result.value.job, ...previous.filter((job) => job.id !== result.value.job.id)].slice(0, 40))
+    // 立刻给一句反馈，别等轮询
+    setNoticeError('')
+    setNotice(t('panel.jobs.started'))
     void loadJobs()
   }
 
@@ -1809,6 +1812,64 @@ export function Panel(props: PanelProps) {
     </>
   )
 
+  /**
+   * 生成任务进行中的横幅：点完「AI 生成纪要」之后，今日页必须一眼看到任务在跑。
+   * 之前只有一个不显眼的「任务」按钮，用户以为没反应。
+   */
+  const renderJobBanner = (dayJobs_: JobDTO[]) => {
+    const active = dayJobs_.filter((job) => job.status === 'queued' || job.status === 'running')
+    if (!active.length) return null
+    const job = active[0]
+    const started = job.status === 'running' && job.startedAt ? Date.parse(job.startedAt) : 0
+    const elapsed = started ? Math.max(0, Math.round((Date.now() - started) / 1000)) : 0
+    const queued = job.status === 'queued'
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 10px',
+        marginBottom: 8,
+        border: `1px solid ${ACCENT}`,
+        borderRadius: RADIUS,
+        background: ACCENT_SOFT,
+        flexWrap: 'wrap',
+      }}>
+        <span style={{
+          width: 8,
+          height: 8,
+          borderRadius: RADIUS_PILL,
+          background: ACCENT,
+          flex: '0 0 auto',
+          opacity: queued ? 0.5 : 1,
+        }} />
+        <span style={{ fontSize: FS.sm, fontWeight: 600, color: ACCENT }}>
+          {queued ? t('panel.jobs.status.queued') : t('panel.jobs.status.running')}
+        </span>
+        <span style={{ ...smallStyle, fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
+          {clock(job.start)}–{clock(job.end)}
+        </span>
+        {elapsed > 0 ? <span style={smallStyle}>{t('panel.jobs.elapsed').replace('{s}', String(elapsed))}</span> : null}
+        {active.length > 1 ? <span style={smallStyle}>+{active.length - 1}</span> : null}
+        <span style={{ flex: '1 1 auto' }} />
+        <button
+          type="button"
+          style={{ ...buttonStyle, borderColor: ACCENT, color: ACCENT }}
+          onClick={() => { void loadJobs(); setTab('jobs') }}
+        >
+          {t('panel.jobs.view')}
+        </button>
+        <button
+          type="button"
+          style={buttonStyle}
+          onClick={() => void cancelJob(job.id)}
+        >
+          {t('panel.jobs.cancel')}
+        </button>
+      </div>
+    )
+  }
+
   const renderToday = () => {
     if (loading && !data) {
       return <div style={{ ...smallStyle, padding: '18px 12px' }}>{t('panel.loading')}</div>
@@ -1855,6 +1916,9 @@ export function Panel(props: PanelProps) {
             : t('panel.transcript.empty')
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+        {activeJobs.length ? (
+          <div style={{ flex: '0 0 auto', padding: '6px 10px 0' }}>{renderJobBanner(jobs)}</div>
+        ) : null}
         <div style={{ flex: '0 0 auto', padding: '6px 10px 0' }}>
           <RangeSelector
             t={t}
@@ -1950,10 +2014,12 @@ export function Panel(props: PanelProps) {
               <button
                 type="button"
                 style={primaryButtonStyle}
-                disabled={!data}
+                disabled={!data || Boolean(currentJob)}
                 onClick={() => void generateDraft()}
               >
-                {t('panel.minutes.generate')}
+                {currentJob
+                  ? (currentJob.status === 'queued' ? t('panel.jobs.status.queued') : t('panel.minutes.generating'))
+                  : t('panel.minutes.generate')}
               </button>
               <span style={{ flex: '1 1 auto' }} />
               <button type="button" style={buttonStyle} onClick={() => setTab('jobs')}>{t('panel.tab.jobs')}</button>
