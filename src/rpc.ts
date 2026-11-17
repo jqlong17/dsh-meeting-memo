@@ -254,11 +254,19 @@ async function dispatch(
       } catch {
         rows = []
       }
+      // 最近 1 小时用 1 分钟粒度（60 点），全天用 5 分钟粒度（288 点）
+      const range = payload.range === 'hour' ? 'hour' : 'day'
+      const bucketMinutes = range === 'hour' ? 1 : 5
+      const nowMinute = (() => {
+        const now = new Date()
+        return now.getHours() * 60 + now.getMinutes()
+      })()
       const buckets = new Map<number, { sum: number; count: number; heap: number; audio: number; fixed: number; mapped: number }>()
       for (const row of rows) {
         const at = new Date(row.at)
         const minute = at.getHours() * 60 + at.getMinutes()
-        const slot = Math.floor(minute / 5) * 5
+        if (range === 'hour' && minute < nowMinute - 60) continue
+        const slot = Math.floor(minute / bucketMinutes) * bucketMinutes
         const bucket = buckets.get(slot) ?? { sum: 0, count: 0, heap: 0, audio: 0, fixed: 0, mapped: 0 }
         bucket.sum += row.occupied || 0
         bucket.count += 1
@@ -277,7 +285,7 @@ async function dispatch(
         fixed: Math.round(bucket.fixed / bucket.count),
         mapped: Math.round(bucket.mapped / bucket.count),
       }))
-      return { day, samples }
+      return { day, range, samples }
     }
     case 'asr.status':
       return requireAsr(asr).runtime.status()

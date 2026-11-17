@@ -291,18 +291,19 @@ export function Panel(props: PanelProps) {
 
   const [demoMode, setDemoMode] = useState(() => isDemoActive())
   const [memoryDay, setMemoryDay] = useState<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }[]>([])
+  const [memoryRange, setMemoryRange] = useState<'hour' | 'day'>('hour')
 
-  const loadMemoryDay = useCallback(async () => {
-    const result = await rpc<{ day: string; samples: Array<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }> }>('asr.memory', {})
+  const loadMemoryDay = useCallback(async (range: 'hour' | 'day') => {
+    const result = await rpc<{ day: string; samples: Array<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }> }>('asr.memory', { range })
     if (result.ok) setMemoryDay(result.value.samples)
   }, [rpc])
 
   useEffect(() => {
     if (tab !== 'asr') return
-    void loadMemoryDay()
-    const timer = window.setInterval(() => { void loadMemoryDay() }, 60_000)
+    void loadMemoryDay(memoryRange)
+    const timer = window.setInterval(() => { void loadMemoryDay(memoryRange) }, 60_000)
     return () => window.clearInterval(timer)
-  }, [tab, loadMemoryDay])
+  }, [tab, loadMemoryDay, memoryRange])
 
   const [update, setUpdate] = useState<UpdateStatusDTO | null>(null)
   const [updateHidden, setUpdateHidden] = useState(false)
@@ -1950,7 +1951,13 @@ export function Panel(props: PanelProps) {
           <div style={{ ...smallStyle, marginTop: 0 }}>
             {t('panel.asr.foot')} {asr?.memory?.length ? formatBytes(asr.memory.at(-1)?.occupied ?? asr.memory.at(-1)?.footprint) : (asr?.running ? formatBytes(asr?.rssBytes) : t('panel.asr.rssIdle'))}
           </div>
-          <MemoryTimeline samples={asr?.memory ?? []} day={memoryDay} t={t} />
+          <MemoryTimeline
+            samples={asr?.memory ?? []}
+            day={memoryDay}
+            range={memoryRange}
+            onRange={(next) => setMemoryRange(next)}
+            t={t}
+          />
           <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.45 }}>{t('panel.asr.memoryHint')}</div>
         </div>
       </div>
@@ -2917,11 +2924,26 @@ function trackColor(track: string): string {
  * 程序堆 / 音频缓冲 / 固定开销，叠起来就是常驻占用。
  * 映射的模型文件（可回收）不参与堆叠，单独一条虚线画在下面，避免把其他分类压扁。
  */
-function MemoryTimeline({ samples, day, t }: {
+function MemoryTimeline({ samples, day, range, onRange, t }: {
   samples: MemorySampleDTO[]
   day: Array<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }>
+  range: 'hour' | 'day'
+  onRange: (next: 'hour' | 'day') => void
   t: (key: string) => string
 }): ReactElement {
+  // 最近 1 小时：横轴是「过去 60 分钟」；全天：00:00–24:00
+  const nowMinute = (() => {
+    const now = new Date()
+    return now.getHours() * 60 + now.getMinutes()
+  })()
+  const baseStart = range === 'hour' ? Math.max(0, nowMinute - 60) : 0
+  const baseEnd = range === 'hour' ? Math.max(60, nowMinute) : 1440
+  // 用户拖出来的窗口；空表示跟着「最近 1 小时 / 全天」走
+  const [zoom, setZoom] = useState<{ start: number; end: number } | null>(null)
+  const [dragging, setDragging] = useState<{ anchor: number; current: number } | null>(null)
+  const windowStart = zoom ? zoom.start : baseStart
+  const windowEnd = zoom ? zoom.end : baseEnd
+  const span = Math.max(1, windowEnd - windowStart)
   const latestStatus = samples.at(-1)
   const latest = day.at(-1)
   const width = 560
@@ -2934,7 +2956,8 @@ function MemoryTimeline({ samples, day, t }: {
   ]
   const totals = day.map((point) => stacks.reduce((sum, part) => sum + (point[part.key] || 0), 0))
   const max = Math.max(1, ...totals)
-  const xAt = (minute: number): number => (Math.min(1440, Math.max(0, minute)) / 1440) * width
+  const xAt = (minute: number): number => ((Math.min(windowEnd, Math.max(windowStart, minute)) - windowStart) / span) * width
+  const minuteAt = (px: number): number => windowStart + (px / width) * span
   const yAt = (value: number): number => height - pad - (value / max) * (height - pad * 2)
 
   // 逐层累加：第 i 层的上边界是前 i 层之和
@@ -2953,7 +2976,9 @@ function MemoryTimeline({ samples, day, t }: {
     return out
   })()
 
-  const ticks = [0, 360, 720, 1080, 1440]
+  const ticks = range === 'hour'
+    ? [0, 15, 30, 45, 60].map((offset) => Math.round(windowStart + offset))
+    : [0, 360, 720, 1080, 1440]
   const totalLabel = latest
     ? formatBytes(stacks.reduce((sum, part) => sum + (latest[part.key] || 0), 0), true)
     : latestStatus ? formatBytes(latestStatus.occupied ?? latestStatus.footprint, true) : '—'
@@ -2963,9 +2988,50 @@ function MemoryTimeline({ samples, day, t }: {
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
         <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.asr.foot')}</span>
         <span style={{ fontFamily: MONO, fontSize: FS.num, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>{totalLabel}</span>
-        <span style={{ ...smallStyle, marginLeft: 'auto', color: FG2 }}>{t('panel.asr.mem.hours')}</span>
+        <span style={{ flex: '1 1 auto' }} />
+        {(['hour', 'day'] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            style={{
+              ...buttonStyle,
+              ...(range === mode ? { borderColor: ACCENT, color: ACCENT, background: ACCENT_SOFT } : {}),
+            }}
+            onClick={() => { setZoom(null); onRange(mode) }}
+          >
+            {t(`panel.asr.mem.range.${mode}`)}
+          </button>
+        ))}
       </div>
-      <svg viewBox={`0 0 ${width} ${height + 14}`} width="100%" height={height + 14} role="img" style={{ display: 'block', marginTop: 4, background: SURFACE_SOFT, borderRadius: RADIUS_CHIP }}>
+      <svg
+        viewBox={`0 0 ${width} ${height + 14}`}
+        width="100%"
+        height={height + 14}
+        role="img"
+        style={{ display: 'block', marginTop: 4, background: SURFACE_SOFT, borderRadius: RADIUS_CHIP, cursor: 'crosshair', touchAction: 'none' }}
+        onPointerDown={(event) => {
+          if (!event.isPrimary) return
+          const rect = event.currentTarget.getBoundingClientRect()
+          const minute = minuteAt(((event.clientX - rect.left) / rect.width) * width)
+          setDragging({ anchor: minute, current: minute })
+          event.currentTarget.setPointerCapture(event.pointerId)
+        }}
+        onPointerMove={(event) => {
+          if (!dragging) return
+          const rect = event.currentTarget.getBoundingClientRect()
+          const minute = minuteAt(((event.clientX - rect.left) / rect.width) * width)
+          setDragging({ ...dragging, current: minute })
+        }}
+        onPointerUp={(event) => {
+          if (!dragging) return
+          const start = Math.min(dragging.anchor, dragging.current)
+          const end = Math.max(dragging.anchor, dragging.current)
+          setDragging(null)
+          try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* 已释放 */ }
+          if (end - start >= 2) setZoom({ start, end })
+        }}
+        onPointerCancel={() => setDragging(null)}
+      >
         {bands.map((band, index) => (
           <path key={index} d={band.path} fill={band.color} opacity={0.45} stroke={band.color} strokeWidth={1} strokeOpacity={0.7} />
         ))}
@@ -2978,12 +3044,34 @@ function MemoryTimeline({ samples, day, t }: {
             strokeDasharray="4 3"
           />
         ) : null}
+        {dragging && Math.abs(dragging.current - dragging.anchor) > 0.2 ? (
+          <rect
+            x={xAt(Math.min(dragging.anchor, dragging.current))}
+            y={0}
+            width={Math.abs(xAt(dragging.current) - xAt(dragging.anchor))}
+            height={height}
+            fill={ACCENT}
+            opacity={0.12}
+          />
+        ) : null}
         {ticks.map((minute) => (
           <text key={minute} x={xAt(minute)} y={height + 11} fontSize={9} fill={CAPTION} textAnchor={minute === 0 ? 'start' : minute === 1440 ? 'end' : 'middle'}>
             {String(Math.floor(minute / 60)).padStart(2, '0')}:00
           </text>
         ))}
       </svg>
+      <div style={{ ...smallStyle, display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+        <span>{t('panel.asr.mem.dragHint')}</span>
+        {zoom ? (
+          <button
+            type="button"
+            style={{ ...buttonStyle, marginLeft: 'auto' }}
+            onClick={() => setZoom(null)}
+          >
+            {t('panel.asr.mem.resetZoom')}
+          </button>
+        ) : null}
+      </div>
       {latest ? (
         <div style={{ display: 'grid', gridTemplateColumns: '8px 72px 72px', columnGap: 8, alignItems: 'center', marginTop: 4, fontSize: FS.xs }}>
           {stacks.map((part) => (
