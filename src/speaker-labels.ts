@@ -108,7 +108,15 @@ export function groupByDay(items: SpeakerLabel[]): Array<{ day: string; items: S
     list.push(item)
     map.set(item.day, list)
   }
+  // 日期新的在上；同一天里按「打标时间」倒序——刚打的在最前，打错了立刻能删
   return [...map.entries()]
     .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([day, list]) => ({ day, items: list.sort((a, b) => a.start - b.start) }))
+    .map(([day, list]) => ({
+      day,
+      items: list.sort((a, b) => {
+        const byCreated = String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+        // 老数据没有 createdAt 时退回按时间点倒序
+        return byCreated !== 0 ? byCreated : b.start - a.start
+      }),
+    }))
 }
