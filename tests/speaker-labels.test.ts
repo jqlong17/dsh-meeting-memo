@@ -55,7 +55,8 @@ test('groups by day with newest first', () => {
     addLabel(home, { day: '2026-11-16', start: 700, end: 701, label: 'C' })
     const groups = groupByDay(readLabels(home))
     assert.deepEqual(groups.map((g) => g.day), ['2026-11-16', '2026-11-15'])
-    assert.deepEqual(groups[0].items.map((i) => i.label), ['B', 'C'])
+    // 同一天内按打标时间倒序：C 是后打的，排在 B 前面
+    assert.deepEqual(groups[0].items.map((i) => i.label), ['C', 'B'])
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
