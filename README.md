@@ -2,6 +2,8 @@
 
 DeepSeek Harness 右侧栏的会议纪要插件。在本机录下会议、用本地语音模型转成文字，再把选中的一段整理成结构化纪要：背景、要点、决策、待办。音频和文字都不离开这台机器。
 
+![会议纪要封面](docs/assets/cover.png)
+
 ## 安装
 
 ```bash
@@ -33,6 +35,22 @@ dsh plugin --profile <你的 profile> add github:jqlong17/dsh-meeting-memo
 | 关于 | 产品说明，以及一段可直接转发的安装话术 |
 
 关掉插件后不再录音、不再整理。已经写下的纪要和背景留在本机。
+
+## 界面
+
+| 边说边转，全程在本机 | 一段话变成一份记录 |
+| --- | --- |
+| ![转写](docs/assets/transcript.png) | ![纪要](docs/assets/minutes.png) |
+
+| 知道每句话是谁说的 | 音频不离开这台电脑 |
+| --- | --- |
+| ![说话人识别](docs/assets/speaker.png) | ![隐私与资源](docs/assets/privacy.png) |
+
+截图来自插件的**演示模式**（关于 → 演示模式），人物、公司、会议内容都是虚构的。
+
+## 安装步骤一览
+
+![安装三步](docs/assets/install.png)
 
 ## 说话人识别的打标
 
@@ -108,6 +126,8 @@ npm run check:mobile -- --base http://127.0.0.1:3091
 - **不碰别人的数据**：不写入 notta 生活日志目录，不修改其他插件的配置。
 
 ## English
+
+![Meeting minutes](docs/assets/cover.png)
 
 A right-sidebar meeting-minutes plugin for DeepSeek Harness. It records the meeting on this machine, transcribes locally with an on-device speech model, and turns a selected span into structured minutes: background, key points, decisions, and to-dos. Audio and text never leave the machine.
 
