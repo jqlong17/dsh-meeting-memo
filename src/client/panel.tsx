@@ -1458,6 +1458,7 @@ export function Panel(props: PanelProps) {
                   type="button"
                   style={{ ...buttonStyle, borderColor: ACCENT, color: ACCENT }}
                   disabled={rebuilding}
+                  title={t('panel.speaker.rebuildHint')}
                   onClick={() => void rebuildSpeakers()}
                 >
                   {rebuilding ? t('panel.speaker.rebuilding') : t('panel.speaker.rebuild')}
