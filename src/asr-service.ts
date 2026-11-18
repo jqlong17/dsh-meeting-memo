@@ -715,7 +715,7 @@ export class AsrRuntime {
       const device = typeof event.input === 'string' ? event.input : ''
       // 先判定再落库：写进去的名字/分数是写这一行当时的快照，之后重算会更新旁边的分配表
       const hit = emb ? this.matchLive(track, emb, device) : null
-      appendSnippet(this.logRoot(), {
+      const line = appendSnippet(this.logRoot(), {
         day,
         startAt,
         endAt,
@@ -727,10 +727,11 @@ export class AsrRuntime {
         ...(device ? { input: device } : {}),
         ...(hit ? { speaker: hit.name, speakerScore: hit.score } : {}),
       })
-      this.snippetLine += 1
+      this.snippetLine = line
       this.snippetsSinceStart += 1
       this.speechWithoutSnippetSec = 0
-      if (hit) this.writeAssignment(day, this.snippetLine, track, hit)
+      // 用写入时返回的真实行号，避免跨天或重启后计数漂移导致名字对错行
+      if (hit) this.writeAssignment(day, line, track, hit)
       this.lastSnippetAt = endAt
       return
     }
@@ -799,7 +800,7 @@ export class AsrRuntime {
       }
       if (!text) return
       const track = this.persisted.mode === 'merged' ? 'merged' : String(event.track || 'mic')
-      appendSnippet(this.logRoot(), {
+      const line = appendSnippet(this.logRoot(), {
         day: dayKey(this.timeZone, new Date(startAt)),
         startAt,
         endAt,

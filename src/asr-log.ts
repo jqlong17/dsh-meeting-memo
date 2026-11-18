@@ -68,7 +68,7 @@ export function resetLineCount(file: string): void {
   lineCounts.delete(file)
 }
 
-export function appendSnippet(root: string, input: AsrSnippetInput): void {
+export function appendSnippet(root: string, input: AsrSnippetInput): number {
   const dir = dayDir(root, input.day)
   const row = {
     id: `asr-${input.track}-${Date.parse(input.startAt) || Date.now()}`,
@@ -89,6 +89,8 @@ export function appendSnippet(root: string, input: AsrSnippetInput): void {
   const line = nextLineNumber(file)
   appendFileSync(file, `${JSON.stringify(row)}\n`, 'utf8')
   if (input.emb) appendEmb(dir, line, input.emb)
+  // 返回真实行号：调用方别自己数，跨天/重启/重写之后计数必然漂
+  return line
 }
 
 export interface AsrActivityInput {
