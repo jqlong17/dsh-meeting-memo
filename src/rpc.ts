@@ -447,7 +447,9 @@ async function dispatch(
           if (!line.trim()) return []
           try {
             const row = JSON.parse(line) as { at?: string }
-            if (!row.at || !row.at.startsWith(day)) return []
+            if (!row.at) return []
+            // 按**本地日期**筛选：文件里存的是 UTC，用字符串前缀会把凌晨那段（UTC 前一天）漏掉
+            if (dayKey(service.config.timeZone, new Date(row.at)) !== day) return []
             return [row as { at: string; occupied: number; heap: number; audio: number; fixed: number; mapped: number }]
           } catch {
             return []
