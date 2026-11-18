@@ -459,8 +459,11 @@ export function Panel(props: PanelProps) {
   const flashTimer = useRef<number | null>(null)
   const seenDoneJobs = useRef<Set<string>>(new Set())
   const jobsSeeded = useRef(false)
+  const minutesModeRef = useRef<'week' | 'all' | 'day'>('week')
+  const refreshRangeRef = useRef<(mode: 'week' | 'all') => Promise<void>>(async () => {})
 
   followRef.current = follow
+  minutesModeRef.current = minutesMode
   selectionRef.current = selection
   dayRef.current = data?.day ?? ''
 
@@ -817,11 +820,16 @@ export function Panel(props: PanelProps) {
     for (const job of next) {
       if (job.status !== 'queued' && job.status !== 'running') seenDoneJobs.current.add(job.id)
     }
-    if (finished.some((job) => job.day === dayRef.current)) {
-      const target = dayRef.current
+    if (finished.length) {
+      // 不管是谁触发的（面板按钮 / 别的会话的 agent），生成完都刷新：
+      // 当天的纪要 + 今日页 + 「最近一周 / 全部」那份列表都要重新拉
+      const target = finished[0].day || dayRef.current
       if (target) void loadMinutes(target)
+      if (target && target !== dayRef.current) void loadDay(target)
+      const mode = minutesModeRef.current
+      if (mode !== 'day') void refreshRangeRef.current(mode)
     }
-  }, [loadMinutes])
+  }, [loadMinutes, loadDay])
 
   useEffect(() => {
     try {
@@ -905,6 +913,8 @@ export function Panel(props: PanelProps) {
     const result = await rpc<MinutesRangeDTO>('minutes.range', { mode })
     if (result.ok) setMinutesRange(result.value)
   }, [rpc])
+  refreshRangeRef.current = loadRange
+
 
   useEffect(() => {
     if (tab !== 'minutes' || minutesMode === 'day') return
