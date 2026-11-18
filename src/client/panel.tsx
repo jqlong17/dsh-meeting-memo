@@ -2184,7 +2184,18 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
                 border: `1px solid ${importSel === item.id ? ACCENT : BORDER}`,
                 background: importSel === item.id ? ACCENT_SOFT : 'transparent',
               }}
-              onClick={() => { setImportSel(item.id); setImportRange(null); void loadImportDetail(item.id) }}
+              onClick={() => {
+                if (importSel === item.id) {
+                  // 再点一次同一个任务就收起，省得一直占着下半屏
+                  setImportSel(null)
+                  setImportDetail(null)
+                  setImportRange(null)
+                  return
+                }
+                setImportSel(item.id)
+                setImportRange(null)
+                void loadImportDetail(item.id)
+              }}
             >
               <span style={{ fontSize: FS.sm, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' }}>
                 {item.name}
@@ -2224,6 +2235,13 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
               <span style={{ flex: '1 1 auto' }} />
               <button type="button" style={primaryButtonStyle} disabled={importGenerating || importDetail.snippets.length === 0} onClick={() => void generateImportMinutes()}>
                 {importGenerating ? t('panel.import.generating') : t('panel.import.generate')}
+              </button>
+              <button
+                type="button"
+                style={buttonStyle}
+                onClick={() => { setImportSel(null); setImportDetail(null); setImportRange(null) }}
+              >
+                {t('panel.import.collapse')}
               </button>
             </div>
             <ImportTimeline
