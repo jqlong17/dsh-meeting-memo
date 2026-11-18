@@ -21,6 +21,10 @@ export interface ImportMeta {
   hash: string
   durationSec: number
   createdAt: string
+  /** 真正开始转写的时间（排队结束时）。 */
+  startedAt?: string
+  /** 转写结束时间（成功、失败或取消都记）。 */
+  finishedAt?: string
   status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
   /** 转写进度（秒），跑完后等于 durationSec。 */
   processedSec: number

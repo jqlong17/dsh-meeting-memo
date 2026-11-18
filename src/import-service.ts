@@ -118,7 +118,7 @@ export class ImportService {
       if (!modelDir || !existsSync(modelDir)) {
         patchMeta(this.home, next.id, { status: 'failed', error: '还没有下载语音模型' })
       } else {
-        patchMeta(this.home, next.id, { status: 'running' })
+        patchMeta(this.home, next.id, { status: 'running', startedAt: new Date().toISOString() })
         this.spawnTranscribe(next.id, next.file, meta, modelDir)
         return
       }
@@ -163,12 +163,14 @@ export class ImportService {
       const current = readMeta(this.home, id)
       if (!current) return
       if (current.status !== 'running') return
+      const finishedAt = new Date().toISOString()
       if (code === 0) {
-        patchMeta(this.home, id, { status: 'done', processedSec: current.durationSec || current.processedSec })
+        patchMeta(this.home, id, { status: 'done', processedSec: current.durationSec || current.processedSec, finishedAt })
         return
       }
       patchMeta(this.home, id, {
         status: current.processedSec > 0 ? 'done' : 'failed',
+        finishedAt,
         error: current.processedSec > 0 ? undefined : (stderr.trim() || `转写进程退出（${code}）`),
       })
     })
@@ -198,7 +200,7 @@ export class ImportService {
       return
     }
     if (type === 'error') {
-      patchMeta(this.home, id, { status: 'failed', error: String(event.message ?? '转写失败') })
+      patchMeta(this.home, id, { status: 'failed', finishedAt: new Date().toISOString(), error: String(event.message ?? '转写失败') })
     }
   }
 
@@ -226,14 +228,14 @@ export class ImportService {
     const queuedAt = this.queue.findIndex((item) => item.id === id)
     if (queuedAt >= 0) {
       this.queue.splice(queuedAt, 1)
-      patchMeta(this.home, id, { status: 'cancelled' })
+      patchMeta(this.home, id, { status: 'cancelled', finishedAt: new Date().toISOString() })
       return true
     }
     const state = this.running.get(id)
     if (!state) return false
     state.child.kill('SIGKILL')
     this.running.delete(id)
-    patchMeta(this.home, id, { status: 'cancelled' })
+    patchMeta(this.home, id, { status: 'cancelled', finishedAt: new Date().toISOString() })
     return true
   }
 

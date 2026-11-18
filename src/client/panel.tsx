@@ -2014,6 +2014,26 @@ function toSrt(rows: Array<{ startSec: number; endSec: number; text: string }>):
 }
 
 /** 可以手输的秒级时间点（m:ss / h:mm:ss），回车或失焦时提交。 */
+
+/** 秒 → m:ss / h:mm:ss（用于时长，不要和「当天第几分钟」混用）。 */
+function clockSec(sec: number): string {
+  const total = Math.max(0, Math.floor(sec))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const secs = total % 60
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(secs)}` : `${m}:${pad(secs)}`
+}
+
+/** ISO → 本地 HH:mm:ss，用于显示导入/开始/结束时间。 */
+function stampOf(iso?: string): string {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
 function ImportTimeInput({ value, max, onCommit }: {
   value: number
   max: number
@@ -2261,11 +2281,17 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
                 void loadImportDetail(item.id)
               }}
             >
-              <span style={{ fontSize: FS.sm, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' }}>
-                {item.name}
+              <span style={{ minWidth: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <span style={{ fontSize: FS.sm, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+                <span style={{ ...smallStyle, fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
+                  {t('panel.import.metaTimes')
+                    .replace('{import}', stampOf(item.createdAt))
+                    .replace('{start}', stampOf(item.startedAt))
+                    .replace('{end}', stampOf(item.finishedAt))}
+                </span>
               </span>
               <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2, fontVariantNumeric: 'tabular-nums' }}>
-                {clock(item.durationSec / 60)}
+                {clockSec(item.durationSec)}
               </span>
               <span style={{ fontSize: FS.xs, color: item.status === 'done' ? SUCCESS : item.status === 'failed' ? DANGER : CAPTION }}>
                 {item.status === 'running'
