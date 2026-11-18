@@ -2352,8 +2352,13 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
               <div style={{ marginTop: 10, borderTop: `1px solid ${BORDER}`, paddingTop: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.import.minutes')}</span>
-                  <button type="button" style={buttonStyle} onClick={() => void copyText(importDetail.minutes ?? '', 'import')}>
-                    {t('panel.copy')}
+                  <span style={{ ...smallStyle }}>{t('panel.import.minutesHint')}</span>
+                  <button
+                    type="button"
+                    style={buttonStyle}
+                    onClick={() => void copyText(importDetail.minutes ?? '', 'minutes')}
+                  >
+                    {t('panel.import.copyMinutes')}
                   </button>
                 </div>
                 <div style={{ marginTop: 4 }}>{renderMarkdownLite(importDetail.minutes ?? '')}</div>
