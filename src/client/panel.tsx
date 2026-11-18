@@ -2578,6 +2578,9 @@ function ImportTimeInput({ value, max, onCommit }: {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.asr.health')}</span>
             <span style={{ flex: '1 1 auto' }} />
+            <button type="button" style={buttonStyle} disabled={restartingAsr} onClick={() => void restartAsr()}>
+              {restartingAsr ? t('panel.asr.hb.restarting') : t('panel.asr.hb.restart')}
+            </button>
             {asr?.audioRestarts ? (
               <span style={{ ...smallStyle }}>{t('panel.asr.health.restarts')} {asr.audioRestarts}</span>
             ) : null}
@@ -4199,6 +4202,9 @@ function MemoryTimeline({ samples, day, range, onRange, t }: {
       ) : (
         <div style={{ ...smallStyle, marginTop: 4 }}>{t('panel.asr.mem.wait')}</div>
       )}
+      {(latest?.occupied ?? 0) > 150 * 1024 * 1024 ? (
+        <div style={{ ...smallStyle, marginTop: 4, lineHeight: 1.5 }}>{t('panel.asr.mem.reclaim')}</div>
+      ) : null}
     </div>
   )
 }
