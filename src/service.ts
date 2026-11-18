@@ -386,6 +386,23 @@ export class MeetingService {
    * Default: exactly one meeting covering the whole selection; splits only when
    * the transcript itself contains an explicit session switch.
    */
+  /**
+   * 交给模型的转写文本。
+   *
+   * 这里必须带说话人：漏掉 speakerOf 时模型只看到「麦克风/系统」，
+   * 纪要里就会出现「产品负责人」「研发同学」这种模糊指代——这坑踩过一次。
+   */
+  promptTranscript(day: string, from: number, to: number): { text: string; truncated: boolean; segments: number } {
+    const { data } = this.loadDay(day)
+    const slice = sliceRange(data, from, to, {
+      maxChars: 40_000,
+      withText: true,
+      speakerOf: (segment) => this.speakerOf(day, segment),
+    })
+    const clipped = clipText(slice.text, 30_000)
+    return { text: clipped.text, truncated: clipped.truncated, segments: slice.segments.length }
+  }
+
   async generateMinutes(
     dayRequest: string | undefined,
     startValue: unknown,
@@ -405,21 +422,15 @@ export class MeetingService {
     const from = Math.min(start, end)
     const to = Math.max(start, end)
     if (to - from < 1) throw new MeetingError('BAD_RANGE', '选区太短，至少 1 分钟')
-    // 必须带上说话人：否则模型只看到「麦克风/系统」，人名信息全丢，
-    // 生成的纪要里就会出现「产品负责人」「研发同学」这种模糊表述。
-    const slice = sliceRange(data, from, to, {
-      maxChars: 40_000,
-      withText: true,
-      speakerOf: (segment) => this.speakerOf(day, segment),
-    })
-    if (!slice.segments.length) {
+    const promptInput = this.promptTranscript(day, from, to)
+    if (!promptInput.segments) {
       throw new MeetingError(
         'EMPTY_RANGE',
         `${day} ${formatClock(from)}–${formatClock(to)} 没有转写内容`,
         '换一段有密度条的区间，或先把区间放宽到「全天」。',
       )
     }
-    const clipped = clipText(slice.text, 30_000)
+    const clipped = { text: promptInput.text, truncated: promptInput.truncated }
     const allowSplit = hasSwitchMarker(clipped.text)
     const cards = this.selectedBackgroundCards(backgroundIds)
     // 内置提示词：不再支持多套写法，生成口径统一在 ai.ts 的 SYSTEM_PROMPT。
