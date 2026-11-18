@@ -42,11 +42,15 @@ export interface AsrStatus {
   message: string
   startedAt: string | null
   lastSnippetAt: string | null
+  /** 最近一分钟的真实采集量：缓冲数与峰值，用来判断「可用但没声音」。 */
+  buffers?: { mic: number; system: number; micPeak: number; systemPeak: number } | null
   /** 需要人看一眼的提示（例如麦克风回退），不是错误。 */
   notice: string | null
   /** 最近的链路中断记录，最新的在前。 */
   interruptions: Array<{ at: string; seconds: number; cause: 'sleep' | 'device' | 'stall' | 'silent' | 'restart' }>
   /** 链路心跳：采集进程多久没吭声、多久没出转写、这次启动以来出过几条。 */
+  /** 最近一分钟的真实采集量：缓冲数与峰值，用来判断「可用但没声音」。 */
+  buffers?: { mic: number; system: number; micPeak: number; systemPeak: number } | null
   /** 需要人看一眼的提示（例如麦克风回退），不是错误。 */
   notice: string | null
   /** 最近的链路中断记录，最新的在前。 */
@@ -320,6 +324,16 @@ export class AsrRuntime {
       message: this.message,
       startedAt: this.startedAt,
       lastSnippetAt: this.lastSnippetAt,
+      buffers: (() => {
+        const last = this.audioTicks[this.audioTicks.length - 1]
+        if (!last) return null
+        return {
+          mic: Number(last.micBuffers) || 0,
+          system: Number(last.systemBuffers) || 0,
+          micPeak: Number(last.micPeak) || 0,
+          systemPeak: Number(last.systemPeak) || 0,
+        }
+      })(),
       notice: this.notice,
       interruptions: this.interruptions.slice(0, 5),
       heartbeat: {

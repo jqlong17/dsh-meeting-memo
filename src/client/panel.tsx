@@ -2565,6 +2565,11 @@ function ImportTimeInput({ value, max, onCommit }: {
                 </>
               )
             })()}
+            {perms.screen && asr?.audio?.system === 'dead' ? (
+              <div style={{ ...smallStyle, marginTop: 6, color: DANGER, lineHeight: 1.5 }}>
+                {t('panel.asr.perm.grantedButSilent')}
+              </div>
+            ) : null}
             <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.5 }}>{t('panel.asr.perm.hint')}</div>
           </div>
         ) : null}
@@ -2592,6 +2597,13 @@ function ImportTimeInput({ value, max, onCommit }: {
               <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5, fontSize: FS.xs }}>
                 <span style={{ width: 8, height: 8, borderRadius: RADIUS_CHIP, background: color, flex: '0 0 auto' }} />
                 <span style={{ minWidth: 0 }}>{row.label}</span>
+                {asr?.buffers ? (
+                  <span style={{ fontFamily: MONO, color: FG2, fontVariantNumeric: 'tabular-nums' }}>
+                    {row.key === 'mic' ? asr.buffers.mic : asr.buffers.system} {t('panel.asr.health.perMin')}
+                    {' · '}
+                    {t('panel.asr.health.peak')} {(row.key === 'mic' ? asr.buffers.micPeak : asr.buffers.systemPeak).toFixed(2)}
+                  </span>
+                ) : null}
                 <span style={{ flex: '1 1 auto' }} />
                 <span style={{ color: textColor }}>{t(`panel.asr.health.${textKey}`)}</span>
               </div>
