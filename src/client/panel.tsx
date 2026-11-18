@@ -15,6 +15,7 @@ import { PLUGIN_VERSION } from '../version.ts'
 import { INTRO_EN, INTRO_ZH, PACKAGE_NAME, buildSharePrompt, buildSharePromptEn } from '../about.ts'
 import { zh as ZH_DICT } from './labels.ts'
 import { TimelineChart } from './timeline.tsx'
+import { TranscriptList, type TranscriptRowView } from './transcript-list.tsx'
 import type { TimelineRange } from './timeline.tsx'
 
 /**
@@ -2091,6 +2092,13 @@ function ImportTimeInput({ value, max, onCommit }: {
     const selection = importRange ?? { start: 0, end: durationSec }
     // 通用时间轴按「单位」取桶：每秒一个，和今日「每分钟一个」同构
     const importBuckets = secondBuckets(importDetail?.snippets ?? [])
+    // 和今日一样：选区变了，下面的列表只显示范围内的句子
+    const inRange = (importDetail?.snippets ?? []).filter((row) => row.endSec > selection.start && row.startSec < selection.end)
+    const importRows: TranscriptRowView[] = inRange.map((row, index) => ({
+      key: `${row.startSec}-${index}`,
+      time: clock(row.startSec),
+      text: row.text,
+    }))
     return (
       <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
         {renderNotices()}
@@ -2225,7 +2233,10 @@ function ImportTimeInput({ value, max, onCommit }: {
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
               <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.import.transcript')}</span>
-              <span style={{ ...smallStyle }}>{importDetail.snippets.length} {t('panel.import.rows')}</span>
+              <span style={{ ...smallStyle }}>
+                {importRows.length} / {importDetail.snippets.length} {t('panel.import.rows')}
+                {importRange ? ` · ${t('panel.import.inRange')} ${clock(selection.start)}–${clock(selection.end)}` : ''}
+              </span>
               <span style={{ flex: '1 1 auto' }} />
               <button
                 type="button"
@@ -2248,12 +2259,7 @@ function ImportTimeInput({ value, max, onCommit }: {
               <div style={{ ...smallStyle, lineHeight: 1.6, marginTop: 6 }}>{t('panel.import.noRows')}</div>
             ) : (
               <div style={{ marginTop: 6, borderTop: `1px solid ${BORDER}` }}>
-                {importDetail.snippets.map((row, index) => (
-                  <div key={index} style={{ display: 'grid', gridTemplateColumns: '64px minmax(0, 1fr)', columnGap: 8, padding: '4px 0', borderBottom: `1px solid ${BORDER}` }}>
-                    <span style={{ fontFamily: MONO, fontSize: FS.xs, color: CAPTION, fontVariantNumeric: 'tabular-nums' }}>{clock(row.startSec)}</span>
-                    <span style={{ fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>{row.text}</span>
-                  </div>
-                ))}
+                <TranscriptList rows={importRows} timeWidth={56} empty={t('panel.import.emptyRange')} />
               </div>
             )}
             {importDetail.minutes ? (
