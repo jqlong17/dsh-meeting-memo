@@ -419,10 +419,7 @@ export class MeetingService {
         '换一段有密度条的区间，或先把区间放宽到「全天」。',
       )
     }
-    // 人名对照表也一起给模型，声纹只认出个别人的时候它还能靠上下文对齐
-    const roster = this.peopleRoster()
-    const transcriptText = roster ? `${roster}\n${slice.text}` : slice.text
-    const clipped = clipText(transcriptText, 30_000)
+    const clipped = clipText(slice.text, 30_000)
     const allowSplit = hasSwitchMarker(clipped.text)
     const cards = this.selectedBackgroundCards(backgroundIds)
     // 内置提示词：不再支持多套写法，生成口径统一在 ai.ts 的 SYSTEM_PROMPT。
