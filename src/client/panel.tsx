@@ -1501,15 +1501,17 @@ export function Panel(props: PanelProps) {
     setNotice(t('panel.minutes.saved'))
   }
 
-  const deleteSession = async (id: string) => {
-    if (!data) return
-    if (confirmId !== id) {
-      setConfirmId(id)
-      window.setTimeout(() => setConfirmId((current) => (current === id ? '' : current)), 4000)
+  const deleteSession = async (id: string, day?: string, key?: string) => {
+    const target = day ?? data?.day
+    if (!target) return
+    const confirmKey = key ?? id
+    if (confirmId !== confirmKey) {
+      setConfirmId(confirmKey)
+      window.setTimeout(() => setConfirmId((current) => (current === confirmKey ? '' : current)), 4000)
       return
     }
     setConfirmId('')
-    const result = await rpc<MinutesPayload>('minutes.delete', { day: data.day, id })
+    const result = await rpc<MinutesPayload>('minutes.delete', { day: target, id })
     if (!result.ok) {
       setNoticeError(result.error.message)
       return
@@ -3351,6 +3353,13 @@ function ImportTimeInput({ value, max, onCommit }: {
                             onClick={() => void copySession(session, group.day, `range-${key}`)}
                           >
                             {flash === `range-${key}` ? t('panel.minutes.copied') : t('panel.minutes.copy')}
+                          </button>
+                          <button
+                            type="button"
+                            style={{ ...buttonStyle, color: confirmId === `range-del-${key}` ? DANGER : FG2, borderColor: confirmId === `range-del-${key}` ? DANGER : BORDER }}
+                            onClick={() => void deleteSession(session.id, group.day, `range-del-${key}`)}
+                          >
+                            {confirmId === `range-del-${key}` ? t('panel.minutes.deleteConfirm') : t('panel.minutes.delete')}
                           </button>
                         </div>
                       </>
