@@ -871,8 +871,10 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
                 config.excludesCurrentProcessAudio = true
                 config.sampleRate = sampleRate
                 config.channelCount = 1
-                config.width = 2
-                config.height = 2
+                // 宽高给真实分辨率：有报告指出 2x2 这种极小尺寸会让流「启动成功但不出数据」
+                config.width = display.width
+                config.height = display.height
+                config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
                 let stream = SCStream(filter: filter, configuration: config, delegate: self)
                 try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
                 try await stream.startCapture()
