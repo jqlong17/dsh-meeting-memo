@@ -2544,6 +2544,11 @@ function ImportTimeInput({ value, max, onCommit }: {
               </div>
             )
           })}
+          {asr?.audio?.system === 'dead' ? (
+            <div style={{ ...smallStyle, marginTop: 6, color: DANGER, lineHeight: 1.5 }}>
+              {t('panel.asr.health.systemDeadHint')}
+            </div>
+          ) : null}
           {(asr?.inputs?.length ?? 0) > 0 ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               <span style={{ fontSize: FS.xs, fontWeight: 600 }}>{t('panel.asr.input')}</span>

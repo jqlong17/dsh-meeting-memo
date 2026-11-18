@@ -622,6 +622,9 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     var deviceWatch: DispatchSourceTimer?
     /// 最后一次收到麦克风样本的时间：引擎「看着在跑但一个样本都没有」时用来判定假死
     var lastMicBufferAt = Date()
+    /// 系统音最近一次收到样本的时间：SCK 在权限失效时会「启动成功但一个数据都没有」。
+    var lastSystemBufferAt = Date()
+    var systemStrikes = 0
 
     init(model: SenseVoice?, mode: String, language: String, audioRoot: String?, inputUID: String?, embedModel: String?) {
         self.embedder = embedModel.flatMap { SpeakerEmbedder(model: $0) }
@@ -697,6 +700,22 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
                 self.startSystem()
                 emit(["type": "status", "phase": "running", "mic": self.engine != nil, "system": self.stream != nil, "input": self.inputName])
                 return
+            }
+            // 系统音：SCK 启动成功但始终没有数据，最常见的原因是「屏幕录制」权限随重签失效
+            if self.stream != nil, Date().timeIntervalSince(self.lastSystemBufferAt) > 60 {
+                self.systemStrikes += 1
+                if self.systemStrikes == 1 {
+                    self.startSystem()
+                    self.lastSystemBufferAt = Date()
+                } else if self.systemStrikes >= 2 {
+                    emit([
+                        "type": "error",
+                        "track": "system",
+                        "message": "系统声音没有收到任何数据：可能是「屏幕录制」权限失效。请在 系统设置 → 隐私与安全性 → 屏幕录制 里重新勾选 DeepSeek Harness，然后重启 DSH。",
+                    ])
+                    self.systemStrikes = 0
+                    self.lastSystemBufferAt = Date()
+                }
             }
             // 引擎在跑却 10 秒没有任何样本：多半是拔插耳机或设备切换后触点停了
             if Date().timeIntervalSince(self.lastMicBufferAt) > 10 {
@@ -883,6 +902,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         if track == "system" {
             systemBuffers += 1
+            lastSystemBufferAt = now
+            systemStrikes = 0
             if peak > systemPeak { systemPeak = peak }
         } else {
             micBuffers += 1

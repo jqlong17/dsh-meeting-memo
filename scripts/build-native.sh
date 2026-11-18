@@ -31,14 +31,14 @@ swiftc -O -import-objc-header "$repo/native/bridge.h" -o "$tmp" \
   -framework CoreMedia
 
 echo "[build-native] signing"
-codesign --force --sign - "$tmp" >/dev/null 2>&1
+codesign --force --sign "${MEETING_HELPER_SIGN_IDENTITY:--}" "$tmp" >/dev/null 2>&1
 
 if [ -f "$bin" ]; then
   cp "$bin" "$bin.bak-$(date +%s)"
 fi
 cp "$tmp" "$bin"
 chmod +x "$bin"
-codesign --force --sign - "$bin" >/dev/null 2>&1
+codesign --force --sign "${MEETING_HELPER_SIGN_IDENTITY:--}" "$bin" >/dev/null 2>&1
 rm -f "$tmp" "$merged"
 
 echo "[build-native] building embed tool"
@@ -47,7 +47,7 @@ if [ -d "$RUNTIME" ]; then
   swiftc -O -import-objc-header "$repo/native/bridge.h" "$repo/native/embed.swift" \
     -I "$RUNTIME/include" -L "$RUNTIME/lib" -lsherpa-onnx-c-api \
     -Xlinker -rpath -Xlinker "$RUNTIME/lib" -o "$home/bin/embed"
-  codesign --force --sign - "$home/bin/embed" >/dev/null 2>&1
+  codesign --force --sign "${MEETING_HELPER_SIGN_IDENTITY:--}" "$home/bin/embed" >/dev/null 2>&1
   echo "[build-native] installed $home/bin/embed"
 fi
 echo "[build-native] installed $bin"
