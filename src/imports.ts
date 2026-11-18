@@ -78,6 +78,8 @@ export function listImports(home: string): ImportMeta[] {
   if (!existsSync(root)) return []
   const items: ImportMeta[] = []
   for (const name of readdirSync(root)) {
+    // .trash 之类的内部目录不算任务
+    if (name.startsWith('.')) continue
     const meta = readMeta(home, name)
     if (meta) items.push(meta)
   }
@@ -190,6 +192,51 @@ export function readMinutes(home: string, id: string): { markdown: string | null
     sessions = []
   }
   return { markdown, sessions }
+}
+
+/** 回收站目录：删除的任务先移到这里，7 天后自动清掉。 */
+export function trashRoot(home: string): string {
+  return path.join(importsRoot(home), '.trash')
+}
+
+/**
+ * 删除任务 = 挪进回收站，不是真删。
+ * 目录名带上时间戳，避免「删掉 → 重新导入同名文件」时撞车。
+ */
+export function trashImport(home: string, id: string, now = new Date()): string | null {
+  const dir = importDir(home, id)
+  if (!existsSync(dir)) return null
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  const target = path.join(trashRoot(home), `${stamp}-${id}`)
+  mkdirSync(trashRoot(home), { recursive: true })
+  renameSync(dir, target)
+  return target
+}
+
+/** 清空回收站里超过保留期的条目，返回删掉几个。 */
+export function purgeTrash(home: string, olderThanMs = 7 * 24 * 60 * 60 * 1000): number {
+  const root = trashRoot(home)
+  if (!existsSync(root)) return 0
+  let removed = 0
+  for (const name of readdirSync(root)) {
+    const full = path.join(root, name)
+    try {
+      if (Date.now() - statSync(full).mtimeMs < olderThanMs) continue
+      rmSync(full, { recursive: true, force: true })
+      removed += 1
+    } catch {
+      // 删不掉就留着
+    }
+  }
+  return removed
+}
+
+/** 回收站里有哪些（面板暂时不展示，留给维护脚本）。 */
+export function listTrash(home: string): string[] {
+  const root = trashRoot(home)
+  if (!existsSync(root)) return []
+  return readdirSync(root).sort()
 }
 
 export function deleteImport(home: string, id: string): boolean {

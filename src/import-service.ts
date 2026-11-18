@@ -15,7 +15,8 @@ import type { MeetingService } from './service.ts'
 import {
   appendSnippet,
   clock,
-  deleteImport,
+  trashImport,
+  purgeTrash,
   findByHash,
   fingerprint,
   importDir,
@@ -82,6 +83,15 @@ export class ImportService {
    * 转写被取消（SIGKILL）时子进程的 defer 不会执行，抽出来的临时音轨会留在磁盘上。
    * 每次插件启动扫一遍，代价极小。
    */
+  /** 启动时清掉回收站里超过 7 天的任务。 */
+  static sweepTrash(home: string, olderThanMs = 7 * 24 * 60 * 60 * 1000): number {
+    try {
+      return purgeTrash(home, olderThanMs)
+    } catch {
+      return 0
+    }
+  }
+
   static sweepTempFiles(olderThanMs = 24 * 60 * 60 * 1000): number {
     let removed = 0
     try {
@@ -316,9 +326,10 @@ export class ImportService {
     }
   }
 
+  /** 删除任务：挪进回收站，7 天后自动清理，不是立刻抹掉。 */
   remove(id: string): boolean {
     if (this.running.has(id)) throw new ImportError('RUNNING', '任务还在转写，先取消再删除')
-    return deleteImport(this.home, id)
+    return trashImport(this.home, id) !== null
   }
 
   /** 用导入任务的转写生成纪要，结果只写在任务目录里。 */

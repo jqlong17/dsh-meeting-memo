@@ -2,13 +2,13 @@
  * 增量拉取与临时文件清扫：面板轮询不该每 2 秒重传整份转写。
  */
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, utimesSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
 import { ImportService } from '../src/import-service.ts'
-import { appendSnippet, writeMeta } from '../src/imports.ts'
+import { appendSnippet, listImports, listTrash, purgeTrash, trashImport, writeMeta } from '../src/imports.ts'
 
 const ID = '20261118-1315-abc12345'
 
@@ -72,4 +72,37 @@ test('清扫临时音轨只删老文件', async () => {
   const removed = ImportService.sweepTempFiles()
   assert.ok(removed >= 1)
   assert.equal(existsSync(file), false)
+})
+
+
+test('删除是移入回收站，不是真删', () => {
+  const { service, home } = makeService()
+  try {
+    assert.equal(service.remove(ID), true)
+    // 任务列表里没了
+    assert.equal(listImports(home).length, 0)
+    // 但目录还在回收站里
+    const trashed = listTrash(home)
+    assert.equal(trashed.length, 1)
+    assert.ok(trashed[0].endsWith(ID))
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('回收站里超过保留期的条目会被清掉', () => {
+  const { service, home } = makeService()
+  try {
+    const target = trashImport(home, ID)
+    assert.ok(target)
+    // 刚放进去：不该被清
+    assert.equal(purgeTrash(home), 0)
+    // 把目录时间改成 8 天前：该被清
+    const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
+    utimesSync(target!, old, old)
+    assert.equal(purgeTrash(home), 1)
+    assert.deepEqual(listTrash(home), [])
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
 })

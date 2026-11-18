@@ -540,6 +540,7 @@ export function Panel(props: PanelProps) {
       setImportSel(null)
       setImportDetail(null)
     }
+    setNotice(t('panel.import.trashed'))
     await loadImports()
   }
 

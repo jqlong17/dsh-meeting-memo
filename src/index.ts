@@ -135,6 +135,7 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
     // 离线导入：复用同一个 helper 与当前选中的模型；helper 路径按运行态解析
   // 启动时把上次取消/崩溃留下的临时音轨清掉
   ImportService.sweepTempFiles()
+  ImportService.sweepTrash(service.config.home)
   const importService = new ImportService(
     service,
     join(service.config.home, 'bin', 'asr-helper'),
