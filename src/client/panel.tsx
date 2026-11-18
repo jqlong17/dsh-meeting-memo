@@ -2578,9 +2578,6 @@ function ImportTimeInput({ value, max, onCommit }: {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.asr.health')}</span>
             <span style={{ flex: '1 1 auto' }} />
-            <button type="button" style={buttonStyle} disabled={restartingAsr} onClick={() => void restartAsr()}>
-              {restartingAsr ? t('panel.asr.hb.restarting') : t('panel.asr.hb.restart')}
-            </button>
             {asr?.audioRestarts ? (
               <span style={{ ...smallStyle }}>{t('panel.asr.health.restarts')} {asr.audioRestarts}</span>
             ) : null}
@@ -2828,8 +2825,14 @@ function ImportTimeInput({ value, max, onCommit }: {
         </div>
 
         <div style={{ ...cardStyle, marginTop: 8 }}>
-          <div style={{ ...smallStyle, marginTop: 0 }}>
-            {t('panel.asr.foot')} {asr?.memory?.length ? formatBytes(asr.memory.at(-1)?.occupied ?? asr.memory.at(-1)?.footprint) : (asr?.running ? formatBytes(asr?.rssBytes) : t('panel.asr.rssIdle'))}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 0 }}>
+            <span style={{ ...smallStyle }}>
+              {t('panel.asr.foot')} {asr?.memory?.length ? formatBytes(asr.memory.at(-1)?.occupied ?? asr.memory.at(-1)?.footprint) : (asr?.running ? formatBytes(asr?.rssBytes) : t('panel.asr.rssIdle'))}
+            </span>
+            <span style={{ flex: '1 1 auto' }} />
+            <button type="button" style={buttonStyle} disabled={restartingAsr} onClick={() => void restartAsr()}>
+              {restartingAsr ? t('panel.asr.hb.restarting') : t('panel.asr.mem.restart')}
+            </button>
           </div>
           <MemoryTimeline
             samples={asr?.memory ?? []}
