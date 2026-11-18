@@ -2001,6 +2001,27 @@ export function Panel(props: PanelProps) {
 
 
 
+
+/**
+ * 把转写片段展开成「每秒钟一个桶」。
+ *
+ * 时间轴的密度/是否有声音都靠桶来判断：只给句子起点打点的话，
+ * 句子中间那些秒就没有桶，悬停会显示「没有声音」——这是错的。
+ */
+function secondBuckets(rows: Array<{ startSec: number; endSec: number }>): Array<{ m: number; s: number }> {
+  const map = new Map<number, number>()
+  for (const row of rows) {
+    const from = Math.max(0, Math.floor(row.startSec))
+    const to = Math.max(from + 1, Math.ceil(Math.max(row.endSec, row.startSec + 0.2)))
+    const span = Math.max(0.2, row.endSec - row.startSec)
+    const per = Math.min(1, span / (to - from))
+    for (let second = from; second < to; second += 1) {
+      map.set(second, Math.min(1, (map.get(second) ?? 0) + per))
+    }
+  }
+  return [...map.entries()].sort((a, b) => a[0] - b[0]).map(([m, s]) => ({ m, s: Math.round(s * 100) / 100 }))
+}
+
 /** 把片段转成 SRT：序号、`HH:MM:SS,mmm --> HH:MM:SS,mmm`、正文，空行分隔。 */
 function toSrt(rows: Array<{ startSec: number; endSec: number; text: string }>): string {
   const stamp = (sec: number): string => {
@@ -2068,11 +2089,8 @@ function ImportTimeInput({ value, max, onCommit }: {
   const renderImport = () => {
     const durationSec = importDetail ? Math.max(1, importDetail.meta.durationSec) : 1
     const selection = importRange ?? { start: 0, end: durationSec }
-    // 通用时间轴按「单位」取桶：这里一秒一个位置
-    const importBuckets = (importDetail?.snippets ?? []).map((row) => ({
-      m: row.startSec,
-      s: Math.max(0.2, row.endSec - row.startSec),
-    }))
+    // 通用时间轴按「单位」取桶：每秒一个，和今日「每分钟一个」同构
+    const importBuckets = secondBuckets(importDetail?.snippets ?? [])
     return (
       <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
         {renderNotices()}
