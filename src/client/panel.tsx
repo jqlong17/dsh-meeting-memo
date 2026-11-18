@@ -404,7 +404,7 @@ export function Panel(props: PanelProps) {
 
   const [importItems, setImportItems] = useState<Array<{ id: string; name: string; durationSec: number; status: string; snippets: number; processedSec: number; error?: string; minutesAt?: string }>>([])
   const [importSel, setImportSel] = useState<string | null>(null)
-  const [importDetail, setImportDetail] = useState<{ meta: { id: string; name: string; durationSec: number; status: string; snippets: number; error?: string }; snippets: Array<{ startSec: number; endSec: number; text: string }>; buckets: Array<{ m: number; s: number }>; minutes: string | null } | null>(null)
+  const [importDetail, setImportDetail] = useState<{ meta: { id: string; name: string; durationSec: number; status: string; snippets: number; error?: string }; snippets: Array<{ startSec: number; endSec: number; text: string }>; buckets: Array<{ m: number; s: number }>; minutes: string | null; sessions: Array<{ start: number; end: number; topic: string }> } | null>(null)
   const [importPath, setImportPath] = useState('')
   const [importBusy, setImportBusy] = useState(false)
   const [importGenerating, setImportGenerating] = useState(false)
@@ -2094,6 +2094,12 @@ function ImportTimeInput({ value, max, onCommit }: {
     const importBuckets = secondBuckets(importDetail?.snippets ?? [])
     // 和今日一样：选区变了，下面的列表只显示范围内的句子
     const inRange = (importDetail?.snippets ?? []).filter((row) => row.endSec > selection.start && row.startSec < selection.end)
+    // 已生成的纪要在时间轴上画成绿色区间（和今日页同一种表达）
+    const importIntervals = (importDetail?.sessions ?? []).map((session) => ({
+      start: session.start * 60,
+      end: session.end * 60,
+      ...(session.topic ? { label: session.topic } : {}),
+    }))
     const importRows: TranscriptRowView[] = inRange.map((row, index) => ({
       key: `${row.startSec}-${index}`,
       time: clock(row.startSec),
@@ -2215,11 +2221,13 @@ function ImportTimeInput({ value, max, onCommit }: {
             </div>
             <TimelineChart
               buckets={importBuckets}
+              intervals={importIntervals}
+              intervalsLabel={t('panel.import.minutesLane')}
               start={0}
               end={durationSec}
               selection={selection}
               unit="second"
-              height={120}
+              height={132}
               labels={{
                 density: t('panel.import.density'),
                 hint: t('panel.import.dragHint'),

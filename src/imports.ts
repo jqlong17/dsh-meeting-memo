@@ -162,12 +162,34 @@ export function writeMinutes(home: string, id: string, markdown: string, json: u
   writeFileSync(path.join(dir, 'minutes.json'), `${JSON.stringify(json, null, 2)}\n`, 'utf8')
 }
 
-export function readMinutes(home: string, id: string): { markdown: string | null } {
+export interface ImportSession {
+  /** 相对文件的起点/终点（分钟，为兼容纪要结构）。 */
+  start: number
+  end: number
+  topic: string
+}
+
+export function readMinutes(home: string, id: string): { markdown: string | null; sessions: ImportSession[] } {
+  let markdown: string | null = null
   try {
-    return { markdown: readFileSync(path.join(importDir(home, id), 'minutes.md'), 'utf8') }
+    markdown = readFileSync(path.join(importDir(home, id), 'minutes.md'), 'utf8')
   } catch {
-    return { markdown: null }
+    markdown = null
   }
+  let sessions: ImportSession[] = []
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(importDir(home, id), 'minutes.json'), 'utf8')) as { sessions?: unknown }
+    if (Array.isArray(parsed.sessions)) {
+      sessions = parsed.sessions.flatMap((item) => {
+        const record = item as { start?: number; end?: number; topic?: string }
+        if (typeof record.start !== 'number' || typeof record.end !== 'number') return []
+        return [{ start: record.start, end: record.end, topic: String(record.topic ?? '') }]
+      })
+    }
+  } catch {
+    sessions = []
+  }
+  return { markdown, sessions }
 }
 
 export function deleteImport(home: string, id: string): boolean {

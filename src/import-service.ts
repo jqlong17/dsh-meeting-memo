@@ -239,11 +239,19 @@ export class ImportService {
     return true
   }
 
-  get(id: string): { meta: ImportMeta; snippets: ReturnType<typeof readSnippets>; buckets: Array<{ m: number; s: number }>; minutes: string | null } {
+  get(id: string): {
+    meta: ImportMeta
+    snippets: ReturnType<typeof readSnippets>
+    buckets: Array<{ m: number; s: number }>
+    minutes: string | null
+    /** 已生成的纪要区间（分钟，相对文件），面板画成绿色条。 */
+    sessions: Array<{ start: number; end: number; topic: string }>
+  } {
     const meta = readMeta(this.home, id)
     if (!meta) throw new ImportError('NO_IMPORT', '找不到这个导入任务')
     const snippets = readSnippets(this.home, id)
-    return { meta, snippets, buckets: bucketsOf(snippets), minutes: readMinutes(this.home, id).markdown }
+    const stored = readMinutes(this.home, id)
+    return { meta, snippets, buckets: bucketsOf(snippets), minutes: stored.markdown, sessions: stored.sessions }
   }
 
   remove(id: string): boolean {
