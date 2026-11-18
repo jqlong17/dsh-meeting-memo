@@ -404,7 +404,7 @@ export function Panel(props: PanelProps) {
 
   const [importItems, setImportItems] = useState<Array<{ id: string; name: string; durationSec: number; status: string; snippets: number; processedSec: number; error?: string; minutesAt?: string }>>([])
   const [importSel, setImportSel] = useState<string | null>(null)
-  const [importDetail, setImportDetail] = useState<{ meta: { id: string; name: string; durationSec: number; status: string; snippets: number; error?: string }; snippets: Array<{ startSec: number; endSec: number; text: string }>; buckets: Array<{ m: number; s: number }>; minutes: string | null; sessions: Array<{ start: number; end: number; topic: string }> } | null>(null)
+  const [importDetail, setImportDetail] = useState<{ meta: { id: string; name: string; durationSec: number; status: string; snippets: number; error?: string }; snippets: Array<{ index: number; startSec: number; endSec: number; text: string }>; buckets: Array<{ m: number; s: number }>; minutes: string | null; sessions: Array<{ start: number; end: number; topic: string }> } | null>(null)
   const [importPath, setImportPath] = useState('')
   const [importBusy, setImportBusy] = useState(false)
   const [importGenerating, setImportGenerating] = useState(false)
@@ -423,7 +423,7 @@ export function Panel(props: PanelProps) {
     const known = reset ? 0 : (importDetailRef.current?.snippets.length ?? 0)
     const result = await rpc<{
       meta: NonNullable<typeof importDetail>['meta']
-      snippets: Array<{ startSec: number; endSec: number; text: string }>
+      snippets: Array<{ index: number; startSec: number; endSec: number; text: string }>
       total: number
       minutes: string | null
       sessions: Array<{ start: number; end: number; topic: string }>
@@ -431,9 +431,13 @@ export function Panel(props: PanelProps) {
     if (!result.ok) return
     setImportDetail((previous) => {
       const base = reset || !previous || previous.meta.id !== id ? [] : previous.snippets
+      // 用绝对下标合并：并发拉取（初始加载 + 轮询）不会把同一条追加两次
+      const merged = new Map<number, (typeof result.value.snippets)[number]>()
+      for (const row of base) merged.set(row.index, row)
+      for (const row of result.value.snippets) merged.set(row.index, row)
       return {
         meta: result.value.meta,
-        snippets: [...base, ...result.value.snippets],
+        snippets: [...merged.values()].sort((a, b) => a.index - b.index),
         total: result.value.total,
         minutes: result.value.minutes,
         sessions: result.value.sessions,

@@ -306,7 +306,7 @@ export class ImportService {
    */
   get(id: string, fromIndex = 0): {
     meta: ImportMeta
-    snippets: ReturnType<typeof readSnippets>
+    snippets: Array<ReturnType<typeof readSnippets>[number] & { index: number }>
     total: number
     minutes: string | null
     /** 已生成的纪要区间（分钟，相对文件），面板画成绿色条。 */
@@ -319,7 +319,8 @@ export class ImportService {
     const stored = readMinutes(this.home, id)
     return {
       meta,
-      snippets: all.slice(start),
+      // 带上绝对下标：面板并发拉取时按 index 去重，避免同一条追加两次
+      snippets: all.slice(start).map((row, offset) => ({ index: start + offset, ...row })),
       total: all.length,
       minutes: stored.markdown,
       sessions: stored.sessions,
