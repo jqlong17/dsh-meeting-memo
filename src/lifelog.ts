@@ -375,7 +375,9 @@ export function sliceRange(
     for (const segment of clipped) {
       // 说话人认得出来就带上，纪要生成和导出都靠它区分谁说的
       const who = options.speakerOf?.(segment)
-      const label = who ? `${trackLabel(segment.track)}/${who}` : trackLabel(segment.track)
+      // 有人名就只写人名；没人名用〔麦克风〕/〔系统〕标轨道。
+      // 旧写法「麦克风/周剑杰(0.79)」会被模型当成两个人，TODO 里就出现「— 麦克风」。
+      const label = who ?? `〔${trackLabel(segment.track)}〕`
       const line = `[${formatClock(segment.s, true)}] ${label}：${segment.text}`
       if (line.length > budget) {
         truncated = true

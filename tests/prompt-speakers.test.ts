@@ -52,7 +52,7 @@ test('交给模型的转写带说话人名字和相似度', () => {
     assert.ok(result.segments >= 1, '应该取到片段')
     assert.match(result.text, /周剑杰\(0\.79\)/, `文本里应有名字：${result.text}`)
     assert.match(result.text, /龙嘉奇\(0\.68\)/)
-    assert.doesNotMatch(result.text, /^\[.*\] 麦克风：/m, '不该只剩轨道名')
+    assert.doesNotMatch(result.text, /麦克风\//, '不该再出现「麦克风/名字」这种会被当成两个人的写法')
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
@@ -64,7 +64,8 @@ test('没有归属时不伪造名字，只给轨道', () => {
     rmSync(path.join(home, 'speaker-assignments'), { recursive: true, force: true })
     const result = service.promptTranscript(DAY, 9 * 60 + 30, 9 * 60 + 40)
     assert.doesNotMatch(result.text, /周剑杰|龙嘉奇/)
-    assert.match(result.text, /麦克风：/)
+    // 没人名时用〔麦克风〕标轨道，方括号形式不会再被当成人名
+    assert.match(result.text, /〔麦克风〕：/)
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
