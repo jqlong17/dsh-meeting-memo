@@ -73,6 +73,11 @@ export interface TimelineChartProps {
   /** Current clock, minutes of day; drawn as a marker when inside the window. */
   now?: number | null
   binMinutes?: number
+  /**
+   * 位置单位：分钟（当日时间轴）或秒（离线导入的文件内时间）。
+   * 只影响分桶粒度、刻度步长和密度归一化，交互完全一致。
+   */
+  unit?: 'minute' | 'second'
   height?: number
   labels: TimelineChartLabels
   formatTime: (minute: number) => string
@@ -117,6 +122,7 @@ export function TimelineChart(props: TimelineChartProps) {
     intervalsLabel,
     now,
     binMinutes = 5,
+    unit = 'minute',
     height = 150,
     labels,
     formatTime,
@@ -173,8 +179,13 @@ export function TimelineChart(props: TimelineChartProps) {
   const start = view.start
   const end = view.end
   const span = Math.max(1, end - start)
-  const bin = span <= 90 ? 1 : span <= 240 ? Math.min(binMinutes, 2) : Math.max(1, binMinutes)
+  // 秒级时间轴：固定约 60 根柱；分钟级沿用原来的分桶策略
+  const bin = unit === 'second'
+    ? Math.max(0.5, span / 60)
+    : span <= 90 ? 1 : span <= 240 ? Math.min(binMinutes, 2) : Math.max(1, binMinutes)
   const binCount = Math.max(1, Math.ceil(span / bin))
+  /** 一个「单位」折算成秒：分钟 60，秒 1。密度归一化要用它。 */
+  const secondsPerUnit = unit === 'minute' ? 60 : 1
 
   const { density, captured } = useMemo(() => {
     const sums = new Float64Array(binCount)
@@ -187,10 +198,10 @@ export function TimelineChart(props: TimelineChartProps) {
     }
     const values = new Float64Array(binCount)
     for (let index = 0; index < binCount; index += 1) {
-      values[index] = Math.min(1, sums[index] / (bin * 60))
+      values[index] = Math.min(1, sums[index] / (bin * secondsPerUnit))
     }
     return { density: values, captured: flags }
-  }, [buckets, start, end, bin, binCount])
+  }, [buckets, start, end, bin, binCount, secondsPerUnit])
 
   const plotW = Math.max(20, width - PADDING.left - PADDING.right)
   const plotH = Math.max(20, height - PADDING.top - PADDING.bottom)
@@ -202,11 +213,20 @@ export function TimelineChart(props: TimelineChartProps) {
   const yOf = (value: number): number => PADDING.top + (1 - clamp(value, 0, 1)) * plotH
 
   const hourTicks = useMemo(() => {
+    if (unit === 'second') {
+      // 秒级：大约 5 个刻度，步长取 1/2/5/10/15/30/60… 里最接近的
+      const raw = Math.max(1, span / 5)
+      const candidates = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
+      const step = candidates.find((item) => item >= raw) ?? Math.round(raw)
+      const ticks: number[] = []
+      for (let at = 0; at <= end + 0.001; at += step) ticks.push(at)
+      return ticks
+    }
     const ticks: number[] = []
     const step = span > 360 ? 60 : span > 120 ? 30 : span > 45 ? 10 : 5
     for (let minute = Math.ceil(start / step) * step; minute <= end; minute += step) ticks.push(minute)
     return ticks
-  }, [start, end])
+  }, [start, end, span, unit])
 
   // 每小时约需 56px 才不挤；宽度不够就隔一个画
   const labelEvery = plotW >= (span / 60) * 56 ? 1 : 2

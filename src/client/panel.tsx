@@ -2064,208 +2064,15 @@ function ImportTimeInput({ value, max, onCommit }: {
   )
 }
 
-/**
- * 离线导入的时间轴：横轴按**秒**，不是分钟。
- *
- * 导入的文件可能只有几十秒，用分钟刻度会出现「一格 1 分钟、根本选不动」的问题。
- * 密度按「总时长 / 60 格」聚合，拖动框选返回秒。
- */
-function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
-  snippets: Array<{ startSec: number; endSec: number; text: string }>
-  durationSec: number
-  selection: { start: number; end: number }
-  onSelect: (range: { start: number; end: number }) => void
-  t: (key: string) => string
-}): ReactElement {
-  const width = 560
-  const height = 72
-  const pad = 6
-  const total = Math.max(1, durationSec)
-  const [drag, setDrag] = useState<{ anchor: number; current: number } | null>(null)
-  const [hover, setHover] = useState<{ x: number; sec: number; speech: number } | null>(null)
-  const svgRef = useRef<SVGSVGElement | null>(null)
-  const dragAnchor = useRef(0)
-  const dragging = useRef(false)
-
-  // 60 格密度：每格覆盖 total/60 秒
-  const slot = total / 60
-  const bins = Array.from({ length: 60 }, () => 0)
-  for (const item of snippets) {
-    const from = Math.max(0, Math.floor(item.startSec / slot))
-    const to = Math.min(59, Math.floor(Math.max(item.startSec, item.endSec - 0.01) / slot))
-    const seconds = Math.max(0.2, item.endSec - item.startSec)
-    for (let index = from; index <= to; index += 1) {
-      bins[index] += seconds / (to - from + 1)
-    }
-  }
-  const maxBin = Math.max(1, ...bins)
-  const xAt = (sec: number): number => (Math.min(total, Math.max(0, sec)) / total) * width
-  const secAt = (px: number): number => (Math.min(width, Math.max(0, px)) / width) * total
-  const yAt = (value: number): number => height - pad - (value / maxBin) * (height - pad * 2)
-  // 拖动用 window 级监听：SVG 上的 pointer capture 在 Electron 里容易丢事件，
-  // 表现就是「选了但框不跟着走」。
-  useEffect(() => {
-    if (!drag) return
-    const secFromEvent = (event: PointerEvent): number => {
-      const element = svgRef.current
-      if (!element) return dragAnchor.current
-      const rect = element.getBoundingClientRect()
-      const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
-      return secAt(ratio * width)
-    }
-    const move = (event: PointerEvent): void => {
-      if (!dragging.current) return
-      setDrag({ anchor: dragAnchor.current, current: secFromEvent(event) })
-    }
-    const up = (event: PointerEvent): void => {
-      if (!dragging.current) return
-      dragging.current = false
-      const current = secFromEvent(event)
-      const from = Math.min(dragAnchor.current, current)
-      const to = Math.max(dragAnchor.current, current)
-      setDrag(null)
-      if (to - from < Math.max(0.5, total / 200)) {
-        onSelect({ start: from, end: total })
-        return
-      }
-      onSelect({ start: from, end: to })
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', up)
-    return () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
-    }
-  }, [drag !== null]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ratio * total)
-  const selLeft = xAt(Math.min(selection.start, selection.end))
-  const selRight = xAt(Math.max(selection.start, selection.end))
-
-  return (
-    <div style={{ marginTop: 4 }}>
-      <div style={{ position: 'relative' }}>
-        <svg
-          viewBox={`0 0 ${width} ${height + 14}`}
-          width="100%"
-          height={height + 14}
-          role="img"
-          style={{ display: 'block', background: SURFACE_SOFT, borderRadius: RADIUS_CHIP, cursor: 'crosshair', touchAction: 'none' }}
-          ref={svgRef}
-          onPointerDown={(event) => {
-            if (!event.isPrimary) return
-            const rect = event.currentTarget.getBoundingClientRect()
-            const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
-            const sec = secAt(ratio * width)
-            dragAnchor.current = sec
-            dragging.current = true
-            setDrag({ anchor: sec, current: sec })
-          }}
-          onPointerMove={(event) => {
-            if (dragging.current) return
-            const rect = event.currentTarget.getBoundingClientRect()
-            const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
-            const sec = secAt(ratio * width)
-            const bin = Math.min(59, Math.floor(sec / slot))
-            setHover({ x: ratio * 100, sec, speech: bins[bin] ?? 0 })
-          }}
-          onPointerLeave={() => setHover(null)}
-        >
-          {drag ? (
-            <rect
-              x={xAt(Math.min(drag.anchor, drag.current))}
-              y={0}
-              width={Math.max(1, Math.abs(xAt(drag.current) - xAt(drag.anchor)))}
-              height={height}
-              fill={ACCENT}
-              opacity={0.22}
-            />
-          ) : (
-            <rect x={selLeft} y={0} width={Math.max(0, selRight - selLeft)} height={height} fill={ACCENT} opacity={0.16} />
-          )}
-          {bins.map((value, index) => {
-            if (value <= 0) return null
-            const x = (index / 60) * width
-            const w = Math.max(1, width / 60 - 1)
-            const y = yAt(value)
-            return <rect key={index} x={x} y={y} width={w} height={height - pad - y} fill={ACCENT} opacity={0.55} rx={1} />
-          })}
-          {drag && Math.abs(drag.current - drag.anchor) > 0.2 ? (
-            <rect
-              x={xAt(Math.min(drag.anchor, drag.current))}
-              y={0}
-              width={Math.abs(xAt(drag.current) - xAt(drag.anchor))}
-              height={height}
-              fill={ACCENT}
-              opacity={0.14}
-            />
-          ) : null}
-          {ticks.map((sec, index) => (
-            <text
-              key={index}
-              x={xAt(sec)}
-              y={height + 11}
-              fontSize={9}
-              fill={CAPTION}
-              textAnchor={index === 0 ? 'start' : index === ticks.length - 1 ? 'end' : 'middle'}
-            >
-              {clock(sec)}
-            </text>
-          ))}
-        </svg>
-        {hover ? (
-          <div
-            style={{
-              position: 'absolute', top: 4,
-              left: `calc(${hover.x}% + ${hover.x > 55 ? -12 : 12}px)`,
-              transform: hover.x > 55 ? 'translateX(-100%)' : 'none',
-              pointerEvents: 'none', background: 'Canvas', color: 'CanvasText',
-              border: `1px solid ${CARD_BORDER}`, borderRadius: RADIUS,
-              boxShadow: '0 8px 24px rgba(16,24,40,.22)', padding: '4px 8px',
-              fontSize: FS.xs, whiteSpace: 'nowrap', zIndex: 2,
-            }}
-          >
-            <div style={{ fontFamily: MONO, fontWeight: 600 }}>{clock(hover.sec)}</div>
-            <div style={{ color: FG2 }}>{t('panel.import.speech')} {hover.speech.toFixed(1)}s</div>
-          </div>
-        ) : null}
-      </div>
-      <div style={{ ...smallStyle, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <span>{t('panel.import.selected')}</span>
-        {drag ? (
-          <span style={{ fontFamily: MONO, color: ACCENT }}>
-            {clock(Math.min(drag.anchor, drag.current))}–{clock(Math.max(drag.anchor, drag.current))}
-          </span>
-        ) : null}
-        <ImportTimeInput
-          value={selection.start}
-          max={total}
-          onCommit={(sec) => onSelect({ start: Math.min(sec, selection.end), end: selection.end })}
-        />
-        <span>–</span>
-        <ImportTimeInput
-          value={selection.end}
-          max={total}
-          onCommit={(sec) => onSelect({ start: selection.start, end: Math.max(sec, selection.start) })}
-        />
-        <button
-          type="button"
-          style={{ ...buttonStyle, padding: '1px 6px', fontSize: FS.xs }}
-          onClick={() => onSelect({ start: 0, end: total })}
-        >
-          {t('panel.import.selectAll')}
-        </button>
-        <span style={{ color: CAPTION }}>{t('panel.import.dragHint')}</span>
-      </div>
-    </div>
-  )
-}
 
   const renderImport = () => {
     const durationSec = importDetail ? Math.max(1, importDetail.meta.durationSec) : 1
     const selection = importRange ?? { start: 0, end: durationSec }
+    // 通用时间轴按「单位」取桶：这里一秒一个位置
+    const importBuckets = (importDetail?.snippets ?? []).map((row) => ({
+      m: row.startSec,
+      s: Math.max(0.2, row.endSec - row.startSec),
+    }))
     return (
       <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
         {renderNotices()}
@@ -2380,12 +2187,23 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
                 {t('panel.import.collapse')}
               </button>
             </div>
-            <ImportTimeline
-              snippets={importDetail.snippets}
-              durationSec={importDetail.meta.durationSec}
+            <TimelineChart
+              buckets={importBuckets}
+              start={0}
+              end={durationSec}
               selection={selection}
-              onSelect={(range) => setImportRange(range)}
-              t={t}
+              unit="second"
+              height={120}
+              labels={{
+                density: t('panel.import.density'),
+                hint: t('panel.import.dragHint'),
+                gap: t('panel.import.gap'),
+                speech: t('panel.import.speech'),
+                now: '',
+              }}
+              formatTime={(sec) => clockSec(sec)}
+              onDraft={(range) => setImportRange(range)}
+              onCommit={(range) => setImportRange(range)}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
               <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.import.transcript')}</span>
