@@ -416,10 +416,7 @@ export function Panel(props: PanelProps) {
 
   const loadImportDetail = useCallback(async (id: string) => {
     const result = await rpc<NonNullable<typeof importDetail>>('imports.get', { id })
-    if (result.ok) {
-      setImportDetail(result.value)
-      setImportRange(null)
-    }
+    if (result.ok) setImportDetail(result.value)
   }, [rpc])
 
   useEffect(() => {
@@ -495,6 +492,7 @@ export function Panel(props: PanelProps) {
       setImportPath('')
       await loadImports()
       setImportSel(result.value.meta.id)
+      setImportRange(null)
       await loadImportDetail(result.value.meta.id)
     } finally {
       setImportBusy(false)
@@ -2080,7 +2078,7 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
           onPointerCancel={() => setDrag(null)}
           onPointerLeave={() => setHover(null)}
         >
-          <rect x={selLeft} y={0} width={Math.max(0, selRight - selLeft)} height={height} fill={ACCENT} opacity={0.08} />
+          <rect x={selLeft} y={0} width={Math.max(0, selRight - selLeft)} height={height} fill={ACCENT} opacity={0.16} />
           {bins.map((value, index) => {
             if (value <= 0) return null
             const x = (index / 60) * width
@@ -2186,7 +2184,7 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
                 border: `1px solid ${importSel === item.id ? ACCENT : BORDER}`,
                 background: importSel === item.id ? ACCENT_SOFT : 'transparent',
               }}
-              onClick={() => { setImportSel(item.id); void loadImportDetail(item.id) }}
+              onClick={() => { setImportSel(item.id); setImportRange(null); void loadImportDetail(item.id) }}
             >
               <span style={{ fontSize: FS.sm, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' }}>
                 {item.name}
