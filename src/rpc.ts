@@ -493,6 +493,10 @@ async function dispatch(
       if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
       return { items: imports.list().map((meta) => ({ ...meta, canDelete: meta.status !== 'running' })) }
     }
+    case 'imports.pick': {
+      if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
+      return { paths: await imports.pick() }
+    }
     case 'imports.start': {
       if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
       const file = String(payload.path || '')

@@ -2,6 +2,10 @@ import AVFoundation
 import CoreAudio
 import CoreML
 import Foundation
+#if canImport(AppKit)
+import AppKit
+import UniformTypeIdentifiers
+#endif
 #if canImport(ScreenCaptureKit)
 import ScreenCaptureKit
 import CoreMedia
@@ -435,6 +439,49 @@ func downsample(_ buffer: AVAudioPCMBuffer, converter: AVAudioConverter, target:
  * 和实时采集的区别：时间基准是文件内的秒数（epoch + 偏移），不是墙上时钟；
  * 单轨、不做换人切分；边读边发 progress，进程被杀即取消。
  */
+
+#if canImport(AppKit)
+/// 弹系统文件选择框，把绝对路径吐给插件。
+/// 浏览器里的 <input type=file> 只给 File 对象、拿不到真实路径，所以选择必须发生在宿主侧。
+func runPick() -> Never {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    app.activate(ignoringOtherApps: true)
+    let panel = NSOpenPanel()
+    panel.allowsMultipleSelection = true
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = false
+    panel.title = "选择音频或视频"
+    panel.message = "可以一次选多个；视频会自动抽取音轨"
+    panel.prompt = "导入"
+    if #available(macOS 11.0, *) {
+        panel.allowedContentTypes = [.audio, .movie, .mpeg4Movie, .quickTimeMovie]
+    }
+    let response = panel.runModal()
+    let paths = response == .OK ? panel.urls.map { $0.path } : []
+    emit(["type": "picked", "paths": paths])
+    exit(0)
+}
+#endif
+
+
+/// 视频/奇怪容器：用 AVFoundation 抽出音轨到临时 m4a。失败返回 nil。
+func exportAudioTrack(from url: URL) -> URL? {
+    let asset = AVURLAsset(url: url)
+    let audioTracks = asset.tracks(withMediaType: .audio)
+    guard !audioTracks.isEmpty else { return nil }
+    guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else { return nil }
+    let out = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("asr-import-\(UUID().uuidString).m4a")
+    session.outputURL = out
+    session.outputFileType = .m4a
+    let semaphore = DispatchSemaphore(value: 0)
+    session.exportAsynchronously { semaphore.signal() }
+    semaphore.wait()
+    if session.status == .completed { return out }
+    return nil
+}
+
 func runTranscribeFile(path: String, modelDir: String, language: String) -> Never {
     let model = SenseVoice()
     do {
@@ -443,10 +490,22 @@ func runTranscribeFile(path: String, modelDir: String, language: String) -> Neve
         emit(["type": "error", "message": "模型加载失败：\(error.localizedDescription)"])
         exit(1)
     }
-    guard let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else {
-        emit(["type": "error", "message": "读不了这个音频文件：\(path)"])
+    let sourceURL = URL(fileURLWithPath: path)
+    var temporary: URL?
+    var file: AVAudioFile?
+    if let direct = try? AVAudioFile(forReading: sourceURL) {
+        file = direct
+    } else if let audio = exportAudioTrack(from: sourceURL), let converted = try? AVAudioFile(forReading: audio) {
+        // 视频或容器：先用 AVFoundation 抽出音轨
+        emit(["type": "info", "message": "已从视频中抽取音轨"])
+        temporary = audio
+        file = converted
+    }
+    guard let file else {
+        emit(["type": "error", "message": "这个文件里没有可用的音轨：\(path)"])
         exit(1)
     }
+    defer { if let temporary { try? FileManager.default.removeItem(at: temporary) } }
     let inputFormat = file.processingFormat
     guard inputFormat.sampleRate > 0,
           let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: 1, interleaved: false),
@@ -950,6 +1009,12 @@ if command == "inputs" {
     exit(0)
 }
 
+#if canImport(AppKit)
+if command == "pick" {
+    runPick()
+}
+#endif
+
 if command == "transcribe" {
     guard let path = arg("file"), let modelDir = arg("model") else {
         fputs("usage: asr-helper transcribe --file PATH --model DIR [--language zhen]\n", stderr)
@@ -959,7 +1024,7 @@ if command == "transcribe" {
 }
 
 guard command == "capture" else {
-    fputs("usage: asr-helper capture --model DIR [--mode raw|tracks|merged] [--audio DIR] [--input UID]\n       asr-helper capture --engine external --audio DIR [--mode raw|tracks|merged]\n       asr-helper transcribe --file PATH --model DIR [--language zhen]\n       asr-helper inputs\n", stderr)
+    fputs("usage: asr-helper capture --model DIR [--mode raw|tracks|merged] [--audio DIR] [--input UID]\n       asr-helper capture --engine external --audio DIR [--mode raw|tracks|merged]\n       asr-helper transcribe --file PATH --model DIR [--language zhen]\n       asr-helper pick\n       asr-helper inputs\n", stderr)
     exit(2)
 }
 

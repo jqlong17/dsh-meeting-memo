@@ -434,6 +434,40 @@ export function Panel(props: PanelProps) {
     return () => window.clearInterval(timer)
   }, [tab, loadImports, loadImportDetail, importSel, importItems])
 
+  /** 弹系统选择框，选中的文件依次入队转写。 */
+  const pickAndImport = async () => {
+    setImportBusy(true)
+    setNoticeError('')
+    try {
+      const picked = await rpc<{ paths: string[] }>('imports.pick', {})
+      if (!picked.ok) {
+        setNoticeError(picked.error.message)
+        return
+      }
+      const paths = picked.value.paths
+      if (!paths.length) return
+      let duplicated = 0
+      let lastId: string | null = null
+      for (const file of paths) {
+        const result = await rpc<{ meta: { id: string }; duplicated: boolean }>('imports.start', { path: file })
+        if (!result.ok) {
+          setNoticeError(result.error.message)
+          continue
+        }
+        if (result.value.duplicated) duplicated += 1
+        lastId = result.value.meta.id
+      }
+      await loadImports()
+      if (lastId) {
+        setImportSel(lastId)
+        await loadImportDetail(lastId)
+      }
+      if (duplicated) setNotice(t('panel.import.duplicatedCount').replace('{n}', String(duplicated)))
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
   const startImport = async () => {
     const file = importPath.trim()
     if (!file) {
@@ -1966,18 +2000,27 @@ export function Panel(props: PanelProps) {
         <div style={{ ...cardStyle }}>
           <div style={{ fontSize: FS.sm, fontWeight: 600, marginBottom: 6 }}>{t('panel.import.title')}</div>
           <div style={{ ...smallStyle, marginBottom: 6, lineHeight: 1.5 }}>{t('panel.import.hint')}</div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input
-              style={{ ...inputStyle, flex: '1 1 auto', minWidth: 0, fontFamily: MONO }}
-              value={importPath}
-              placeholder={t('panel.import.pathPlaceholder')}
-              onChange={(event) => setImportPath(event.target.value)}
-              onKeyDown={(event) => { if (event.key === 'Enter') void startImport() }}
-            />
-            <button type="button" style={primaryButtonStyle} disabled={importBusy} onClick={() => void startImport()}>
-              {importBusy ? t('panel.import.starting') : t('panel.import.start')}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" style={primaryButtonStyle} disabled={importBusy} onClick={() => void pickAndImport()}>
+              {importBusy ? t('panel.import.starting') : t('panel.import.pick')}
             </button>
+            <span style={{ ...smallStyle }}>{t('panel.import.formats')}</span>
           </div>
+          <details style={{ marginTop: 6 }}>
+            <summary style={{ ...smallStyle, cursor: 'pointer' }}>{t('panel.import.manual')}</summary>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+              <input
+                style={{ ...inputStyle, flex: '1 1 auto', minWidth: 0, fontFamily: MONO }}
+                value={importPath}
+                placeholder={t('panel.import.pathPlaceholder')}
+                onChange={(event) => setImportPath(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') void startImport() }}
+              />
+              <button type="button" style={buttonStyle} disabled={importBusy} onClick={() => void startImport()}>
+                {t('panel.import.start')}
+              </button>
+            </div>
+          </details>
         </div>
 
         <div style={{ ...cardStyle }}>

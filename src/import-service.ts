@@ -47,6 +47,9 @@ interface Running {
 
 export class ImportService {
   private running = new Map<string, Running>()
+  /** 串行队列：一次只跑一个转写，避免多个进程同时加载模型占满内存。 */
+  private queue: Array<{ id: string; file: string }> = []
+  private busy = false
 
   private readonly service: MeetingService
   private readonly helper: string
@@ -96,9 +99,32 @@ export class ImportService {
       processedSec: 0,
       snippets: 0,
     }
-    writeMeta(this.home, meta)
-    this.spawnTranscribe(id, file, meta, modelDir)
-    return { meta, duplicated: false }
+    const queued = { ...meta, status: 'queued' as const }
+    writeMeta(this.home, queued)
+    this.queue.push({ id, file })
+    void this.pump()
+    return { meta: queued, duplicated: false }
+  }
+
+  /** 串行处理队列：上一个结束（或失败）才起下一个。 */
+  private async pump(): Promise<void> {
+    if (this.busy) return
+    const next = this.queue.shift()
+    if (!next) return
+    this.busy = true
+    const meta = readMeta(this.home, next.id)
+    if (meta && meta.status === 'queued') {
+      const modelDir = this.resolveModelDir()
+      if (!modelDir || !existsSync(modelDir)) {
+        patchMeta(this.home, next.id, { status: 'failed', error: '还没有下载语音模型' })
+      } else {
+        patchMeta(this.home, next.id, { status: 'running' })
+        this.spawnTranscribe(next.id, next.file, meta, modelDir)
+        return
+      }
+    }
+    this.busy = false
+    void this.pump()
   }
 
   private spawnTranscribe(id: string, file: string, meta: ImportMeta, modelDir: string): void {
@@ -131,6 +157,9 @@ export class ImportService {
     })
     child.on('exit', (code) => {
       this.running.delete(id)
+      this.busy = false
+      void this.pump()
+
       const current = readMeta(this.home, id)
       if (!current) return
       if (current.status !== 'running') return
@@ -173,7 +202,33 @@ export class ImportService {
     }
   }
 
+  /** 弹系统文件选择框，返回选中的绝对路径（可能是多个）。 */
+  async pick(): Promise<string[]> {
+    return new Promise((resolve) => {
+      const child = spawn(this.helper, ['pick'], { stdio: ['ignore', 'pipe', 'inherit'] })
+      let stdout = ''
+      child.stdout?.setEncoding('utf8')
+      child.stdout?.on('data', (chunk: string) => { stdout += chunk })
+      child.on('exit', () => {
+        const line = stdout.split('\n').map((item) => item.trim()).filter(Boolean).pop() ?? ''
+        try {
+          const parsed = JSON.parse(line) as { paths?: string[] }
+          resolve(Array.isArray(parsed.paths) ? parsed.paths : [])
+        } catch {
+          resolve([])
+        }
+      })
+      child.on('error', () => resolve([]))
+    })
+  }
+
   cancel(id: string): boolean {
+    const queuedAt = this.queue.findIndex((item) => item.id === id)
+    if (queuedAt >= 0) {
+      this.queue.splice(queuedAt, 1)
+      patchMeta(this.home, id, { status: 'cancelled' })
+      return true
+    }
     const state = this.running.get(id)
     if (!state) return false
     state.child.kill('SIGKILL')

@@ -21,7 +21,7 @@ export interface ImportMeta {
   hash: string
   durationSec: number
   createdAt: string
-  status: 'running' | 'done' | 'failed' | 'cancelled'
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
   /** 转写进度（秒），跑完后等于 durationSec。 */
   processedSec: number
   snippets: number
