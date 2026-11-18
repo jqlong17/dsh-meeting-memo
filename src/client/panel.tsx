@@ -1999,6 +1999,38 @@ export function Panel(props: PanelProps) {
 
 
 
+
+/** 可以手输的秒级时间点（m:ss / h:mm:ss），回车或失焦时提交。 */
+function ImportTimeInput({ value, max, onCommit }: {
+  value: number
+  max: number
+  onCommit: (sec: number) => void
+}): ReactElement {
+  const [text, setText] = useState(clock(value))
+  useEffect(() => setText(clock(value)), [value])
+  const commit = () => {
+    const parts = text.trim().split(':').map((item) => Number(item))
+    if (parts.some((item) => !Number.isFinite(item) || item < 0)) {
+      setText(clock(value))
+      return
+    }
+    const sec = parts.length === 3
+      ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+      : parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0] ?? 0
+    onCommit(Math.max(0, Math.min(max, sec)))
+  }
+  return (
+    <input
+      style={{ ...inputStyle, width: 62, padding: '1px 6px', fontFamily: MONO, fontSize: FS.xs, textAlign: 'center' }}
+      value={text}
+      onChange={(event) => setText(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => { if (event.key === 'Enter') commit() }}
+      aria-label="time"
+    />
+  )
+}
+
 /**
  * 离线导入的时间轴：横轴按**秒**，不是分钟。
  *
@@ -2126,8 +2158,27 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
           </div>
         ) : null}
       </div>
-      <div style={{ ...smallStyle, marginTop: 4 }}>
-        {t('panel.import.dragHint')} · {t('panel.import.selected')} {clock(selection.start)}–{clock(selection.end)}
+      <div style={{ ...smallStyle, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span>{t('panel.import.selected')}</span>
+        <ImportTimeInput
+          value={selection.start}
+          max={total}
+          onCommit={(sec) => onSelect({ start: Math.min(sec, selection.end), end: selection.end })}
+        />
+        <span>–</span>
+        <ImportTimeInput
+          value={selection.end}
+          max={total}
+          onCommit={(sec) => onSelect({ start: selection.start, end: Math.max(sec, selection.start) })}
+        />
+        <button
+          type="button"
+          style={{ ...buttonStyle, padding: '1px 6px', fontSize: FS.xs }}
+          onClick={() => onSelect({ start: 0, end: total })}
+        >
+          {t('panel.import.selectAll')}
+        </button>
+        <span style={{ color: CAPTION }}>{t('panel.import.dragHint')}</span>
       </div>
     </div>
   )
