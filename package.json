@@ -48,7 +48,8 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "prepare": "npm run build",
     "check:mobile": "node selftest-mobile.mjs",
-    "build:native": "./scripts/build-native.sh"
+    "build:native": "./scripts/build-native.sh",
+    "prepublishOnly": "node scripts/prepublish-check.mjs"
   },
   "files": [
     "src",

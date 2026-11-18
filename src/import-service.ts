@@ -7,13 +7,13 @@
  * - 不需要心跳：任务本身就是一次性的，进程退出即结束。
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 import type { MeetingService } from './service.ts'
 import {
   appendSnippet,
-  bucketsOf,
   clock,
   deleteImport,
   findByHash,
@@ -50,6 +50,9 @@ export class ImportService {
   /** 串行队列：一次只跑一个转写，避免多个进程同时加载模型占满内存。 */
   private queue: Array<{ id: string; file: string }> = []
   private busy = false
+  /** 待落盘的 meta 改动：进度/句数这类高频更新合并写，避免一分钟几十次落盘。 */
+  private pending = new Map<string, Partial<ImportMeta>>()
+  private lastFlush = new Map<string, number>()
 
   private readonly service: MeetingService
   private readonly helper: string
@@ -71,6 +74,33 @@ export class ImportService {
 
   private get home(): string {
     return this.service.config.home
+  }
+
+  /**
+   * 清扫 /tmp 里 24 小时前的 `asr-import-*.m4a`。
+   *
+   * 转写被取消（SIGKILL）时子进程的 defer 不会执行，抽出来的临时音轨会留在磁盘上。
+   * 每次插件启动扫一遍，代价极小。
+   */
+  static sweepTempFiles(olderThanMs = 24 * 60 * 60 * 1000): number {
+    let removed = 0
+    try {
+      const dir = os.tmpdir()
+      for (const name of readdirSync(dir)) {
+        if (!name.startsWith('asr-import-') || !name.endsWith('.m4a')) continue
+        const full = path.join(dir, name)
+        try {
+          if (Date.now() - statSync(full).mtimeMs < olderThanMs) continue
+          unlinkSync(full)
+          removed += 1
+        } catch {
+          // 删不掉就算了
+        }
+      }
+    } catch {
+      // 扫不了就算了
+    }
+    return removed
   }
 
   list(): ImportMeta[] {
@@ -127,6 +157,26 @@ export class ImportService {
     void this.pump()
   }
 
+  /**
+   * 合并写 meta：普通的进度/计数攒着，每 10 秒落一次；
+   * 状态变化（done/failed/cancelled）立刻落，不能等。
+   */
+  private queueMeta(id: string, patch: Partial<ImportMeta>): void {
+    const merged = { ...(this.pending.get(id) ?? {}), ...patch }
+    this.pending.set(id, merged)
+    const urgent = patch.status !== undefined || patch.finishedAt !== undefined || patch.startedAt !== undefined
+    const last = this.lastFlush.get(id) ?? 0
+    if (urgent || Date.now() - last >= 10_000) this.flushMeta(id)
+  }
+
+  private flushMeta(id: string): void {
+    const patch = this.pending.get(id)
+    if (!patch) return
+    this.pending.delete(id)
+    this.lastFlush.set(id, Date.now())
+    patchMeta(this.home, id, patch)
+  }
+
   private spawnTranscribe(id: string, file: string, meta: ImportMeta, modelDir: string): void {
     const child = spawn(this.helper, ['transcribe', '--file', file, '--model', modelDir, '--language', this.resolveLanguage()], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -165,10 +215,10 @@ export class ImportService {
       if (current.status !== 'running') return
       const finishedAt = new Date().toISOString()
       if (code === 0) {
-        patchMeta(this.home, id, { status: 'done', processedSec: current.durationSec || current.processedSec, finishedAt })
+        this.queueMeta(id, { status: 'done', processedSec: current.durationSec || current.processedSec, finishedAt })
         return
       }
-      patchMeta(this.home, id, {
+      this.queueMeta(id, {
         status: current.processedSec > 0 ? 'done' : 'failed',
         finishedAt,
         error: current.processedSec > 0 ? undefined : (stderr.trim() || `转写进程退出（${code}）`),
@@ -180,11 +230,11 @@ export class ImportService {
   private onEvent(id: string, event: Record<string, unknown>): void {
     const type = String(event.type ?? '')
     if (type === 'start') {
-      patchMeta(this.home, id, { durationSec: Number(event.durationSec) || 0, model: this.resolveModelDir() })
+      this.queueMeta(id, { durationSec: Number(event.durationSec) || 0, model: this.resolveModelDir() })
       return
     }
     if (type === 'progress') {
-      patchMeta(this.home, id, { processedSec: Number(event.processedSec) || 0 })
+      this.queueMeta(id, { processedSec: Number(event.processedSec) || 0 })
       return
     }
     if (type === 'snippet') {
@@ -195,12 +245,13 @@ export class ImportService {
         endSec: Number(event.endSec) || 0,
         text,
       })
-      const current = readMeta(this.home, id)
-      if (current) patchMeta(this.home, id, { snippets: current.snippets + 1 })
+      const pending = this.pending.get(id)?.snippets
+      const base = pending ?? readMeta(this.home, id)?.snippets ?? 0
+      this.queueMeta(id, { snippets: base + 1 })
       return
     }
     if (type === 'error') {
-      patchMeta(this.home, id, { status: 'failed', finishedAt: new Date().toISOString(), error: String(event.message ?? '转写失败') })
+      this.queueMeta(id, { status: 'failed', finishedAt: new Date().toISOString(), error: String(event.message ?? '转写失败') })
     }
   }
 
@@ -228,30 +279,41 @@ export class ImportService {
     const queuedAt = this.queue.findIndex((item) => item.id === id)
     if (queuedAt >= 0) {
       this.queue.splice(queuedAt, 1)
-      patchMeta(this.home, id, { status: 'cancelled', finishedAt: new Date().toISOString() })
+      this.queueMeta(id, { status: 'cancelled', finishedAt: new Date().toISOString() })
       return true
     }
     const state = this.running.get(id)
     if (!state) return false
     state.child.kill('SIGKILL')
     this.running.delete(id)
-    patchMeta(this.home, id, { status: 'cancelled', finishedAt: new Date().toISOString() })
+    this.queueMeta(id, { status: 'cancelled', finishedAt: new Date().toISOString() })
     return true
   }
 
-  get(id: string): {
+  /**
+   * 读任务详情。`fromIndex` 用于增量拉取：面板已经有的片段不必每 2 秒重传一遍。
+   * 密度桶由面板自己按已有片段算，这里不再重复计算。
+   */
+  get(id: string, fromIndex = 0): {
     meta: ImportMeta
     snippets: ReturnType<typeof readSnippets>
-    buckets: Array<{ m: number; s: number }>
+    total: number
     minutes: string | null
     /** 已生成的纪要区间（分钟，相对文件），面板画成绿色条。 */
     sessions: Array<{ start: number; end: number; topic: string }>
   } {
     const meta = readMeta(this.home, id)
     if (!meta) throw new ImportError('NO_IMPORT', '找不到这个导入任务')
-    const snippets = readSnippets(this.home, id)
+    const all = readSnippets(this.home, id)
+    const start = Number.isFinite(fromIndex) && fromIndex > 0 ? Math.min(fromIndex, all.length) : 0
     const stored = readMinutes(this.home, id)
-    return { meta, snippets, buckets: bucketsOf(snippets), minutes: stored.markdown, sessions: stored.sessions }
+    return {
+      meta,
+      snippets: all.slice(start),
+      total: all.length,
+      minutes: stored.markdown,
+      sessions: stored.sessions,
+    }
   }
 
   remove(id: string): boolean {

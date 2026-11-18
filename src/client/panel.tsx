@@ -415,10 +415,35 @@ export function Panel(props: PanelProps) {
     if (result.ok) setImportItems(result.value.items)
   }, [rpc])
 
-  const loadImportDetail = useCallback(async (id: string) => {
-    const result = await rpc<NonNullable<typeof importDetail>>('imports.get', { id })
-    if (result.ok) setImportDetail(result.value)
+  /**
+   * 拉任务详情。`reset=true` 时从零拉（切换任务），否则只取本地已有的之后的增量，
+   * 避免 2 秒一次把整份转写重传。
+   */
+  const loadImportDetail = useCallback(async (id: string, reset = false) => {
+    const known = reset ? 0 : (importDetailRef.current?.snippets.length ?? 0)
+    const result = await rpc<{
+      meta: NonNullable<typeof importDetail>['meta']
+      snippets: Array<{ startSec: number; endSec: number; text: string }>
+      total: number
+      minutes: string | null
+      sessions: Array<{ start: number; end: number; topic: string }>
+    }>('imports.get', { id, fromIndex: known })
+    if (!result.ok) return
+    setImportDetail((previous) => {
+      const base = reset || !previous || previous.meta.id !== id ? [] : previous.snippets
+      return {
+        meta: result.value.meta,
+        snippets: [...base, ...result.value.snippets],
+        total: result.value.total,
+        minutes: result.value.minutes,
+        sessions: result.value.sessions,
+      }
+    })
   }, [rpc])
+
+
+
+  const importDetailRef = useRef<typeof importDetail>(null)
 
   useEffect(() => {
     if (tab !== 'import') return
@@ -494,7 +519,7 @@ export function Panel(props: PanelProps) {
       await loadImports()
       setImportSel(result.value.meta.id)
       setImportRange(null)
-      await loadImportDetail(result.value.meta.id)
+      await loadImportDetail(result.value.meta.id, true)
     } finally {
       setImportBusy(false)
     }
@@ -533,7 +558,7 @@ export function Panel(props: PanelProps) {
         return
       }
       setNotice(t('panel.import.generated'))
-      await loadImportDetail(importSel)
+      await loadImportDetail(importSel, true)
       await loadImports()
     } finally {
       setImportGenerating(false)
@@ -602,6 +627,7 @@ export function Panel(props: PanelProps) {
   const refreshRangeRef = useRef<(mode: 'week' | 'all') => Promise<void>>(async () => {})
 
   followRef.current = follow
+  if (importDetailRef.current !== importDetail) importDetailRef.current = importDetail
   minutesModeRef.current = minutesMode
   selectionRef.current = selection
   dayRef.current = data?.day ?? ''
@@ -2138,7 +2164,7 @@ function ImportTimeInput({ value, max, onCommit }: {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.import.tasks')}</span>
             <span style={{ flex: '1 1 auto' }} />
-            <button type="button" style={buttonStyle} onClick={() => { void loadImports(); if (importSel) void loadImportDetail(importSel) }}>
+            <button type="button" style={buttonStyle} onClick={() => { void loadImports(); if (importSel) void loadImportDetail(importSel, true) }}>
               {t('panel.import.refresh')}
             </button>
           </div>
@@ -2163,7 +2189,7 @@ function ImportTimeInput({ value, max, onCommit }: {
                 }
                 setImportSel(item.id)
                 setImportRange(null)
-                void loadImportDetail(item.id)
+                void loadImportDetail(item.id, true)
               }}
             >
               <span style={{ minWidth: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
