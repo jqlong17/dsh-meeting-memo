@@ -2000,6 +2000,19 @@ export function Panel(props: PanelProps) {
 
 
 
+
+/** 把片段转成 SRT：序号、`HH:MM:SS,mmm --> HH:MM:SS,mmm`、正文，空行分隔。 */
+function toSrt(rows: Array<{ startSec: number; endSec: number; text: string }>): string {
+  const stamp = (sec: number): string => {
+    const ms = Math.max(0, Math.round(sec * 1000))
+    const pad = (value: number, width = 2): string => String(value).padStart(width, '0')
+    return `${pad(Math.floor(ms / 3_600_000))}:${pad(Math.floor((ms % 3_600_000) / 60_000))}:${pad(Math.floor((ms % 60_000) / 1000))},${pad(ms % 1000, 3)}`
+  }
+  return rows
+    .map((row, index) => `${index + 1}\n${stamp(row.startSec)} --> ${stamp(Math.max(row.endSec, row.startSec + 0.2))}\n${row.text}`)
+    .join('\n\n')
+}
+
 /** 可以手输的秒级时间点（m:ss / h:mm:ss），回车或失焦时提交。 */
 function ImportTimeInput({ value, max, onCommit }: {
   value: number
@@ -2302,6 +2315,27 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
               onSelect={(range) => setImportRange(range)}
               t={t}
             />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+              <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.import.transcript')}</span>
+              <span style={{ ...smallStyle }}>{importDetail.snippets.length} {t('panel.import.rows')}</span>
+              <span style={{ flex: '1 1 auto' }} />
+              <button
+                type="button"
+                style={buttonStyle}
+                disabled={importDetail.snippets.length === 0}
+                onClick={() => void copyText(toSrt(importDetail.snippets), 'srt')}
+              >
+                {t('panel.import.copySrt')}
+              </button>
+              <button
+                type="button"
+                style={buttonStyle}
+                disabled={importDetail.snippets.length === 0}
+                onClick={() => void copyText(importDetail.snippets.map((row) => row.text).join('\n'), 'plain')}
+              >
+                {t('panel.import.copyText')}
+              </button>
+            </div>
             {importDetail.snippets.length === 0 ? (
               <div style={{ ...smallStyle, lineHeight: 1.6, marginTop: 6 }}>{t('panel.import.noRows')}</div>
             ) : (
