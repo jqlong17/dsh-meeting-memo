@@ -429,6 +429,95 @@ func downsample(_ buffer: AVAudioPCMBuffer, converter: AVAudioConverter, target:
     return Array(UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
 }
 
+/**
+ * 离线转写：读一个音频文件，复用同一套 VAD 与 SenseVoice，输出相对时间。
+ *
+ * 和实时采集的区别：时间基准是文件内的秒数（epoch + 偏移），不是墙上时钟；
+ * 单轨、不做换人切分；边读边发 progress，进程被杀即取消。
+ */
+func runTranscribeFile(path: String, modelDir: String, language: String) -> Never {
+    let model = SenseVoice()
+    do {
+        try model.load(dir: modelDir)
+    } catch {
+        emit(["type": "error", "message": "模型加载失败：\(error.localizedDescription)"])
+        exit(1)
+    }
+    guard let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else {
+        emit(["type": "error", "message": "读不了这个音频文件：\(path)"])
+        exit(1)
+    }
+    let inputFormat = file.processingFormat
+    guard inputFormat.sampleRate > 0,
+          let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: 1, interleaved: false),
+          let converter = AVAudioConverter(from: inputFormat, to: target) else {
+        emit(["type": "error", "message": "这个音频的格式不支持转写"])
+        exit(1)
+    }
+    let durationSec = Double(file.length) / inputFormat.sampleRate
+    emit(["type": "start", "durationSec": durationSec, "sampleRate": inputFormat.sampleRate])
+
+    let epoch = Date(timeIntervalSince1970: 0)
+    let utterance = Utterance()
+    var consumed = 0
+    var snippets = 0
+    var lastProgress = Date.distantPast
+    let chunkFrames = AVAudioFrameCount(max(1024, Int(inputFormat.sampleRate)))
+
+    func flush(_ done: (flush: [Float], start: Date, speech: Double)) {
+        guard done.flush.count >= minSamples else { return }
+        do {
+            let text = try model.transcribePreferred(done.flush, preference: language)
+            guard !text.isEmpty else { return }
+            let startSec = done.start.timeIntervalSince(epoch)
+            snippets += 1
+            emit([
+                "type": "snippet",
+                "startSec": (startSec * 1000).rounded() / 1000,
+                "endSec": ((startSec + Double(done.flush.count) / Double(sampleRate)) * 1000).rounded() / 1000,
+                "text": text,
+                "speechSeconds": done.speech,
+            ])
+        } catch {
+            emit(["type": "error", "message": "转写失败：\(error.localizedDescription)"])
+        }
+    }
+
+    while true {
+        // 读到文件尾就停（AVAudioFile 在 EOF 会抛 -39，别当错误报出来）
+        if file.framePosition >= file.length { break }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: chunkFrames) else { break }
+        do {
+            try file.read(into: buffer)
+        } catch {
+            emit(["type": "error", "message": "读取音频出错：\(error.localizedDescription)"])
+            exit(1)
+        }
+        if buffer.frameLength == 0 { break }
+        let mono = downsample(buffer, converter: converter, target: target)
+        var index = 0
+        while index < mono.count {
+            let end = min(index + 320, mono.count)
+            let frame = Array(mono[index..<end])
+            index = end
+            consumed += frame.count
+            let now = epoch.addingTimeInterval(Double(consumed) / Double(sampleRate))
+            if let done = utterance.push(frame, now: now) { flush(done) }
+        }
+        if Date().timeIntervalSince(lastProgress) > 2 {
+            lastProgress = Date()
+            emit([
+                "type": "progress",
+                "processedSec": min(durationSec, Double(consumed) / Double(sampleRate)),
+                "durationSec": durationSec,
+            ])
+        }
+    }
+    if let done = utterance.flush() { flush(done) }
+    emit(["type": "done", "snippets": snippets, "durationSec": durationSec])
+    exit(0)
+}
+
 final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     let model: SenseVoice?
     let mode: String
@@ -861,8 +950,16 @@ if command == "inputs" {
     exit(0)
 }
 
+if command == "transcribe" {
+    guard let path = arg("file"), let modelDir = arg("model") else {
+        fputs("usage: asr-helper transcribe --file PATH --model DIR [--language zhen]\n", stderr)
+        exit(2)
+    }
+    runTranscribeFile(path: path, modelDir: modelDir, language: arg("language") ?? "zhen")
+}
+
 guard command == "capture" else {
-    fputs("usage: asr-helper capture --model DIR [--mode raw|tracks|merged] [--audio DIR] [--input UID]\n       asr-helper capture --engine external --audio DIR [--mode raw|tracks|merged]\n       asr-helper inputs\n", stderr)
+    fputs("usage: asr-helper capture --model DIR [--mode raw|tracks|merged] [--audio DIR] [--input UID]\n       asr-helper capture --engine external --audio DIR [--mode raw|tracks|merged]\n       asr-helper transcribe --file PATH --model DIR [--language zhen]\n       asr-helper inputs\n", stderr)
     exit(2)
 }
 

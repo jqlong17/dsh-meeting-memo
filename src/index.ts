@@ -21,7 +21,10 @@ import { PACKAGE_NAME } from './about.ts'
 import { updateTick } from './update.ts'
 import { PLUGIN_VERSION } from './version.ts'
 import { MinutesJobStore } from './jobs.ts'
+import { join } from 'node:path'
+
 import { registerMeetingRoutes } from './rpc.ts'
+import { ImportService } from './import-service.ts'
 import { MeetingError, MeetingService } from './service.ts'
 
 export const name = 'dsh-meeting-memo'
@@ -129,7 +132,14 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
   })
 
   ctx.inject(['connection', 'webServer'], (scope: Context) => {
-    scope.effect(() => registerMeetingRoutes(scope, service, jobs, { models: asrModels, runtime: asr, downloads }), 'meeting-minutes: panel rpc')
+    // 离线导入：复用同一个 helper 与当前选中的模型；helper 路径按运行态解析
+  const importService = new ImportService(
+    service,
+    join(service.config.home, 'bin', 'asr-helper'),
+    () => asrModels.selected()?.path ?? '',
+    () => asr.status().language ?? 'zhen',
+  )
+  scope.effect(() => registerMeetingRoutes(scope, service, jobs, { models: asrModels, runtime: asr, downloads, imports: importService }), 'meeting-minutes: panel rpc')
     scope.effect(() => registerMobile(scope, service), 'meeting-minutes: mobile page')
   })
 

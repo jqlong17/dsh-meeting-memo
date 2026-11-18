@@ -386,6 +386,71 @@ export class MeetingService {
    * Default: exactly one meeting covering the whole selection; splits only when
    * the transcript itself contains an explicit session switch.
    */
+
+  /**
+   * 调一次模型拿全文。
+   * 按天生成纪要和「离线导入」共用这一段，避免两处各写一遍流式解析。
+   */
+  async streamPrompt(prompt: { system: string; user: string }, options: { sessionId?: string; signal?: AbortSignal } = {}): Promise<string> {
+    if (!this.llm) throw new MeetingError('NO_LLM', '还没有可用的模型通道', 'Host 没有提供 llm 服务；重启 DSH 后再试。')
+    const route = await this.resolveRoute()
+    let text = ''
+    const blockTexts: string[] = []
+    const timeout = AbortSignal.timeout(360_000)
+    const callSignal = options.signal && typeof AbortSignal.any === 'function'
+      ? AbortSignal.any([options.signal, timeout])
+      : timeout
+    try {
+      const sentenceStream = this.llm.stream({
+        provider: route.provider,
+        model: route.model,
+        system: prompt.system,
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt.user }] }],
+        maxTokens: 8_000,
+        temperature: 0.3,
+        signal: callSignal,
+        purpose: 'meeting-minutes',
+        ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      })
+      for await (const chunk of sentenceStream) {
+        if (!chunk || typeof chunk !== 'object') continue
+        const record = chunk as Record<string, unknown>
+        if (record.type === 'text-delta' && typeof record.text === 'string') {
+          text += record.text
+          continue
+        }
+        if (record.type === 'block-end') {
+          const block = record.block && typeof record.block === 'object' ? record.block as Record<string, unknown> : {}
+          if (block.type === 'text' && typeof block.text === 'string') blockTexts.push(block.text)
+          continue
+        }
+        if (record.type === 'finish') {
+          const reason = record.reason as { kind?: unknown } | string | undefined
+          const kind = typeof reason === 'string' ? reason : (reason && typeof reason.kind === 'string' ? reason.kind : undefined)
+          if (kind === 'aborted' || callSignal.aborted) {
+            throw new MeetingError('LLM_TIMEOUT', '生成超过 6 分钟，已停止等待', '内容太长时会变慢。可以重试，或把范围缩短。')
+          }
+          if (kind !== undefined && kind !== 'stop') {
+            throw new MeetingError('LLM_FINISHED', `模型提前结束（${kind}）`, '可以重试；若总是被截断，换一个模型。')
+          }
+        }
+      }
+    } catch (error) {
+      if (options.signal?.aborted) throw new MeetingError('CANCELLED', '已取消')
+      if (error instanceof MeetingError) throw error
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new MeetingError('LLM_TIMEOUT', '模型调用超时（90 秒）', '缩小范围，或在插件配置里换一个更快的 model。')
+      }
+      throw new MeetingError(
+        'LLM_FAILED',
+        `模型调用失败：${error instanceof Error ? error.message : String(error)}`,
+        `模型路由 ${route.provider}/${route.model}；可在插件配置里指定 provider / model。`,
+      )
+    }
+    if (options.signal?.aborted) throw new MeetingError('CANCELLED', '已取消')
+    return blockTexts.length ? blockTexts.join('') : text
+  }
+
   /**
    * 交给模型的转写文本。
    *
@@ -451,59 +516,7 @@ export class MeetingService {
     if (signal?.aborted) throw new MeetingError('CANCELLED', '已取消')
     const route = await this.resolveRoute()
     const startedAt = Date.now()
-    let text = ''
-    const blockTexts: string[] = []
-    const timeout = AbortSignal.timeout(360_000)
-    const callSignal = signal && typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, timeout]) : timeout
-    try {
-      const sentenceStream = this.llm.stream({
-        provider: route.provider,
-        model: route.model,
-        system: prompt.system,
-        messages: [{ role: 'user', content: [{ type: 'text', text: prompt.user }] }],
-        maxTokens: 8_000,
-        temperature: 0.3,
-        signal: callSignal,
-        purpose: 'meeting-minutes',
-        ...(sessionId ? { sessionId } : {}),
-      })
-      for await (const chunk of sentenceStream) {
-        if (!chunk || typeof chunk !== 'object') continue
-        const record = chunk as Record<string, unknown>
-        if (record.type === 'text-delta' && typeof record.text === 'string') {
-          text += record.text
-          continue
-        }
-        if (record.type === 'block-end') {
-          const block = record.block && typeof record.block === 'object' ? record.block as Record<string, unknown> : {}
-          if (block.type === 'text' && typeof block.text === 'string') blockTexts.push(block.text)
-          continue
-        }
-        if (record.type === 'finish') {
-          const reason = record.reason as { kind?: unknown } | string | undefined
-          const kind = typeof reason === 'string' ? reason : (reason && typeof reason.kind === 'string' ? reason.kind : undefined)
-          if (kind === 'aborted' || callSignal.aborted) {
-            throw new MeetingError('LLM_TIMEOUT', '生成超过 6 分钟，已停止等待', '选区或补充资料太长时会变慢。可以重试，或把区间缩短。')
-          }
-          if (kind !== undefined && kind !== 'stop') {
-            throw new MeetingError('LLM_FINISHED', `模型提前结束（${kind}）`, '可以重试；若总是被截断，换一个模型。')
-          }
-        }
-      }
-    } catch (error) {
-      if (signal?.aborted) throw new MeetingError('CANCELLED', '已取消')
-      if (error instanceof MeetingError) throw error
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new MeetingError('LLM_TIMEOUT', '模型调用超时（90 秒）', '缩小选区，或在插件配置里换一个更快的 model。')
-      }
-      throw new MeetingError(
-        'LLM_FAILED',
-        `模型调用失败：${error instanceof Error ? error.message : String(error)}`,
-        `模型路由 ${route.provider}/${route.model}；可在插件配置里指定 provider / model。`,
-      )
-    }
-    if (signal?.aborted) throw new MeetingError('CANCELLED', '已取消')
-    const output = blockTexts.length ? blockTexts.join('') : text
+    const output = await this.streamPrompt(prompt, { ...(sessionId ? { sessionId } : {}), ...(signal ? { signal } : {}) })
     if (!output.trim()) throw new MeetingError('LLM_EMPTY', '模型没有返回内容', '重试；或换一个模型。')
     let meetings: ParsedMeeting[]
     try {

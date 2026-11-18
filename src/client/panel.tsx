@@ -204,8 +204,8 @@ function lastDataMinute(data: DayPayload): number {
 }
 
 const TAB_KEY = 'dsh-mm-tab'
-type PanelTab = 'today' | 'minutes' | 'background' | 'jobs' | 'asr' | 'speaker' | 'about'
-const TABS: PanelTab[] = ['today', 'minutes', 'background', 'jobs', 'asr', 'speaker', 'about']
+type PanelTab = 'today' | 'minutes' | 'background' | 'jobs' | 'asr' | 'speaker' | 'import' | 'about'
+const TABS: PanelTab[] = ['today', 'minutes', 'background', 'jobs', 'asr', 'speaker', 'import', 'about']
 
 /** 插件重载会让面板重建，把上次停留的标签页读回来，避免每次都跳回「今日」。 */
 function readTab(): PanelTab {
@@ -400,6 +400,103 @@ export function Panel(props: PanelProps) {
   const [memoryDay, setMemoryDay] = useState<{ minute: number; occupied: number; heap: number; audio: number; fixed: number; mapped: number }[]>([])
   const [storage, setStorage] = useState<{ audio: { files: number; bytes: number; days: Array<{ day: string; files: number; bytes: number }> }; backups: { files: number; bytes: number } } | null>(null)
   const [cleaning, setCleaning] = useState(false)
+
+  const [importItems, setImportItems] = useState<Array<{ id: string; name: string; durationSec: number; status: string; snippets: number; processedSec: number; error?: string; minutesAt?: string }>>([])
+  const [importSel, setImportSel] = useState<string | null>(null)
+  const [importDetail, setImportDetail] = useState<{ meta: { id: string; name: string; durationSec: number; status: string; snippets: number; error?: string }; snippets: Array<{ startSec: number; endSec: number; text: string }>; buckets: Array<{ m: number; s: number }>; minutes: string | null } | null>(null)
+  const [importPath, setImportPath] = useState('')
+  const [importBusy, setImportBusy] = useState(false)
+  const [importGenerating, setImportGenerating] = useState(false)
+  const [importRange, setImportRange] = useState<{ start: number; end: number } | null>(null)
+
+  const loadImports = useCallback(async () => {
+    const result = await rpc<{ items: typeof importItems }>('imports.list')
+    if (result.ok) setImportItems(result.value.items)
+  }, [rpc])
+
+  const loadImportDetail = useCallback(async (id: string) => {
+    const result = await rpc<NonNullable<typeof importDetail>>('imports.get', { id })
+    if (result.ok) {
+      setImportDetail(result.value)
+      setImportRange(null)
+    }
+  }, [rpc])
+
+  useEffect(() => {
+    if (tab !== 'import') return
+    void loadImports()
+    const running = importItems.some((item) => item.status === 'running')
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void loadImports()
+      if (importSel) void loadImportDetail(importSel)
+    }, running ? 2_000 : 10_000)
+    return () => window.clearInterval(timer)
+  }, [tab, loadImports, loadImportDetail, importSel, importItems])
+
+  const startImport = async () => {
+    const file = importPath.trim()
+    if (!file) {
+      setNoticeError(t('panel.import.needPath'))
+      return
+    }
+    setImportBusy(true)
+    setNoticeError('')
+    try {
+      const result = await rpc<{ meta: { id: string }; duplicated: boolean }>('imports.start', { path: file })
+      if (!result.ok) {
+        setNoticeError(result.error.hint ? `${result.error.message} · ${result.error.hint}` : result.error.message)
+        return
+      }
+      if (result.value.duplicated) setNotice(t('panel.import.duplicated'))
+      setImportPath('')
+      await loadImports()
+      setImportSel(result.value.meta.id)
+      await loadImportDetail(result.value.meta.id)
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  const cancelImport = async (id: string) => {
+    await rpc('imports.cancel', { id })
+    await loadImports()
+  }
+
+  const deleteImport = async (id: string) => {
+    const result = await rpc<{ deleted: boolean }>('imports.delete', { id })
+    if (!result.ok) {
+      setNoticeError(result.error.message)
+      return
+    }
+    if (importSel === id) {
+      setImportSel(null)
+      setImportDetail(null)
+    }
+    await loadImports()
+  }
+
+  const generateImportMinutes = async () => {
+    if (!importSel) return
+    setImportGenerating(true)
+    setNoticeError('')
+    try {
+      const range = importRange
+      const result = await rpc<{ markdown: string }>('imports.generate', {
+        id: importSel,
+        ...(range ? { startSec: range.start * 60, endSec: range.end * 60 } : {}),
+      })
+      if (!result.ok) {
+        setNoticeError(result.error.message)
+        return
+      }
+      setNotice(t('panel.import.generated'))
+      await loadImportDetail(importSel)
+      await loadImports()
+    } finally {
+      setImportGenerating(false)
+    }
+  }
 
   const loadStorage = useCallback(async () => {
     const result = await rpc<{ audio: { files: number; bytes: number; days: Array<{ day: string; files: number; bytes: number }> }; backups: { files: number; bytes: number } }>('asr.storage', {})
@@ -1859,6 +1956,137 @@ export function Panel(props: PanelProps) {
     )
   }
 
+
+  const renderImport = () => {
+    const durationMinutes = importDetail ? Math.max(1, importDetail.meta.durationSec / 60) : 1
+    const selection = importRange ?? { start: 0, end: durationMinutes }
+    return (
+      <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
+        {renderNotices()}
+        <div style={{ ...cardStyle }}>
+          <div style={{ fontSize: FS.sm, fontWeight: 600, marginBottom: 6 }}>{t('panel.import.title')}</div>
+          <div style={{ ...smallStyle, marginBottom: 6, lineHeight: 1.5 }}>{t('panel.import.hint')}</div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input
+              style={{ ...inputStyle, flex: '1 1 auto', minWidth: 0, fontFamily: MONO }}
+              value={importPath}
+              placeholder={t('panel.import.pathPlaceholder')}
+              onChange={(event) => setImportPath(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') void startImport() }}
+            />
+            <button type="button" style={primaryButtonStyle} disabled={importBusy} onClick={() => void startImport()}>
+              {importBusy ? t('panel.import.starting') : t('panel.import.start')}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ ...cardStyle }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.import.tasks')}</span>
+            <span style={{ flex: '1 1 auto' }} />
+            <button type="button" style={buttonStyle} onClick={() => { void loadImports(); if (importSel) void loadImportDetail(importSel) }}>
+              {t('panel.import.refresh')}
+            </button>
+          </div>
+          {importItems.length === 0 ? (
+            <div style={{ ...smallStyle, lineHeight: 1.6 }}>{t('panel.import.empty')}</div>
+          ) : importItems.map((item) => (
+            <div
+              key={item.id}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', marginTop: 4,
+                borderRadius: RADIUS_CHIP, cursor: 'pointer',
+                border: `1px solid ${importSel === item.id ? ACCENT : BORDER}`,
+                background: importSel === item.id ? ACCENT_SOFT : 'transparent',
+              }}
+              onClick={() => { setImportSel(item.id); void loadImportDetail(item.id) }}
+            >
+              <span style={{ fontSize: FS.sm, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' }}>
+                {item.name}
+              </span>
+              <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2, fontVariantNumeric: 'tabular-nums' }}>
+                {clock(item.durationSec / 60)}
+              </span>
+              <span style={{ fontSize: FS.xs, color: item.status === 'done' ? SUCCESS : item.status === 'failed' ? DANGER : CAPTION }}>
+                {item.status === 'running'
+                  ? `${t('panel.import.status.running')} ${Math.round((item.processedSec / Math.max(1, item.durationSec)) * 100)}%`
+                  : t(`panel.import.status.${item.status}`)}
+              </span>
+              <span style={{ fontSize: FS.xs, color: CAPTION }}>{item.snippets} {t('panel.import.rows')}</span>
+              {item.status === 'running' ? (
+                <button type="button" style={{ ...buttonStyle, padding: '1px 6px', fontSize: FS.xs }} onClick={(event) => { event.stopPropagation(); void cancelImport(item.id) }}>
+                  {t('panel.import.cancel')}
+                </button>
+              ) : (
+                <button type="button" style={{ ...buttonStyle, padding: '1px 6px', fontSize: FS.xs, color: DANGER }} onClick={(event) => { event.stopPropagation(); void deleteImport(item.id) }}>
+                  {t('panel.import.delete')}
+                </button>
+              )}
+            </div>
+          ))}
+          {importItems.some((item) => item.status === 'failed' && item.error) ? (
+            <div style={{ ...smallStyle, marginTop: 6, color: DANGER }}>
+              {importItems.filter((item) => item.status === 'failed' && item.error).map((item) => `${item.name}: ${item.error}`).join('；')}
+            </div>
+          ) : null}
+        </div>
+
+        {importDetail ? (
+          <div style={{ ...cardStyle }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{importDetail.meta.name}</span>
+              <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2 }}>{clock(importDetail.meta.durationSec / 60)}</span>
+              <span style={{ flex: '1 1 auto' }} />
+              <button type="button" style={primaryButtonStyle} disabled={importGenerating || importDetail.snippets.length === 0} onClick={() => void generateImportMinutes()}>
+                {importGenerating ? t('panel.import.generating') : t('panel.import.generate')}
+              </button>
+            </div>
+            <TimelineChart
+              buckets={importDetail.buckets}
+              start={0}
+              end={durationMinutes}
+              selection={selection}
+              height={140}
+              labels={{
+                density: t('panel.import.density'),
+                hint: t('panel.import.dragHint'),
+                gap: t('panel.import.gap'),
+                speech: t('panel.import.speech'),
+                now: '',
+              }}
+              formatTime={(minute) => clock(minute)}
+              onDraft={(range) => setImportRange(range)}
+              onCommit={(range) => setImportRange(range)}
+            />
+            {importDetail.snippets.length === 0 ? (
+              <div style={{ ...smallStyle, lineHeight: 1.6, marginTop: 6 }}>{t('panel.import.noRows')}</div>
+            ) : (
+              <div style={{ marginTop: 6, borderTop: `1px solid ${BORDER}` }}>
+                {importDetail.snippets.map((row, index) => (
+                  <div key={index} style={{ display: 'grid', gridTemplateColumns: '64px minmax(0, 1fr)', columnGap: 8, padding: '4px 0', borderBottom: `1px solid ${BORDER}` }}>
+                    <span style={{ fontFamily: MONO, fontSize: FS.xs, color: CAPTION, fontVariantNumeric: 'tabular-nums' }}>{clock(row.startSec)}</span>
+                    <span style={{ fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>{row.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {importDetail.minutes ? (
+              <div style={{ marginTop: 10, borderTop: `1px solid ${BORDER}`, paddingTop: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.import.minutes')}</span>
+                  <button type="button" style={buttonStyle} onClick={() => void copyText(importDetail.minutes ?? '', 'import')}>
+                    {t('panel.copy')}
+                  </button>
+                </div>
+                <div style={{ marginTop: 4 }}>{renderMarkdownLite(importDetail.minutes ?? '')}</div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
   const renderAbout = () => {
     // 用字典回读判断当前语言，避免依赖 slot 是否透传 locale。
     const isEn = t('panel.tab.today') !== ZH_DICT['panel.tab.today']
@@ -2923,7 +3151,7 @@ export function Panel(props: PanelProps) {
       <div style={{ flex: '0 0 auto', padding: 'var(--pl-pad) var(--pl-pad) 10px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, borderBottom: `1px solid ${BORDER}` }}>
           <div style={{ display: 'flex', gap: 12, overflowX: 'auto', minWidth: 0 }}>
-            {(['today', 'minutes', 'background', 'jobs', 'asr', 'speaker', 'about'] as const).map((key) => (
+            {(['today', 'minutes', 'background', 'jobs', 'asr', 'speaker', 'import', 'about'] as const).map((key) => (
               <button
                 key={key}
                 type="button"
@@ -3047,7 +3275,7 @@ export function Panel(props: PanelProps) {
         </div>
       ) : null}
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {tab === 'today' ? renderToday() : tab === 'minutes' ? renderMinutes() : tab === 'background' ? renderBackground() : tab === 'jobs' ? renderJobs() : tab === 'asr' ? renderAsr() : tab === 'speaker' ? renderSpeaker() : renderAbout()}
+        {tab === 'today' ? renderToday() : tab === 'minutes' ? renderMinutes() : tab === 'background' ? renderBackground() : tab === 'jobs' ? renderJobs() : tab === 'asr' ? renderAsr() : tab === 'speaker' ? renderSpeaker() : tab === 'import' ? renderImport() : renderAbout()}
       </div>
     </div>
   )

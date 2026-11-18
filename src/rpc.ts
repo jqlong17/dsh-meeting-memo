@@ -19,6 +19,7 @@ import path from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 
 import { AsrModelRegistry } from './asr-models.ts'
+import type { ImportService } from './import-service.ts'
 import { ModelDownloads } from './model-download.ts'
 import { defaultDownloadRoot, offerMatches, offersForPlatform } from './model-catalog.ts'
 import type { AsrRuntime } from './asr-service.ts'
@@ -488,6 +489,40 @@ async function dispatch(
       }))
       return { day, range, samples }
     }
+    case 'imports.list': {
+      if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
+      return { items: imports.list().map((meta) => ({ ...meta, canDelete: meta.status !== 'running' })) }
+    }
+    case 'imports.start': {
+      if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
+      const file = String(payload.path || '')
+      const result = imports.start(file)
+      return { meta: result.meta, duplicated: result.duplicated }
+    }
+    case 'imports.get': {
+      if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
+      const id = String(payload.id || '')
+      return imports.get(id)
+    }
+    case 'imports.cancel': {
+      if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
+      return { cancelled: imports.cancel(String(payload.id || '')) }
+    }
+    case 'imports.delete': {
+      if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
+      return { deleted: imports.remove(String(payload.id || '')) }
+    }
+    case 'imports.generate': {
+      if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
+      const id = String(payload.id || '')
+      const startSec = Number(payload.startSec)
+      const endSec = Number(payload.endSec)
+      return imports.generate(
+        id,
+        Number.isFinite(startSec) ? startSec : undefined,
+        Number.isFinite(endSec) ? endSec : undefined,
+      )
+    }
     case 'asr.status':
       return requireAsr(asr).runtime.status()
     case 'asr.set': {
@@ -813,6 +848,7 @@ async function dispatch(
 }
 
 function modelPayload(asr: { models: AsrModelRegistry; downloads?: ModelDownloads }): Record<string, unknown> {
+  const imports = asr?.imports
   const listed = asr.models.list()
   return {
     ...listed,
@@ -925,7 +961,7 @@ export function registerMeetingRoutes(
   ctx: Context,
   service: MeetingService,
   jobs?: MinutesJobStore,
-  asr?: { models: AsrModelRegistry; runtime: AsrRuntime; downloads?: ModelDownloads },
+  asr?: { models: AsrModelRegistry; runtime: AsrRuntime; downloads?: ModelDownloads; imports?: ImportService },
 ): () => void {
   const bridge = routeBridge()
   const owner = Symbol('meeting-minutes-route')
