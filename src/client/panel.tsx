@@ -603,6 +603,7 @@ export function Panel(props: PanelProps) {
 
   useEffect(() => {
     if (tab !== 'asr') return
+    void loadPermissions()
     void loadStorage()
     void loadHeartbeatDay(hbRange)
     const timer = window.setInterval(() => { void loadHeartbeatDay(hbRange) }, 60_000)
@@ -1415,6 +1416,19 @@ export function Panel(props: PanelProps) {
     }
     setAsr(result.value)
   }
+
+  const [perms, setPerms] = useState<{ mic: string; screen: boolean; supported: boolean } | null>(null)
+  const [permBusy, setPermBusy] = useState(false)
+
+  const loadPermissions = useCallback(async (request = false) => {
+    setPermBusy(true)
+    try {
+      const result = await rpc<{ mic: string; screen: boolean; supported: boolean }>('asr.permissions', { request })
+      if (result.ok) setPerms(result.value)
+    } finally {
+      setPermBusy(false)
+    }
+  }, [rpc])
 
   const [restartingAsr, setRestartingAsr] = useState(false)
 
@@ -2515,6 +2529,45 @@ function ImportTimeInput({ value, max, onCommit }: {
           </div>
           <div style={{ ...smallStyle, marginTop: 4, lineHeight: 1.5 }}>{asr?.message || t('panel.asr.hint')}</div>
         </div>
+
+        {perms?.supported ? (
+          <div style={{ ...cardStyle, marginTop: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{t('panel.asr.perm.title')}</span>
+              <span style={{ flex: '1 1 auto' }} />
+              <button type="button" style={buttonStyle} disabled={permBusy} onClick={() => void loadPermissions(false)}>
+                {t('panel.asr.perm.refresh')}
+              </button>
+              <button type="button" style={buttonStyle} disabled={permBusy} onClick={() => void loadPermissions(true)}>
+                {t('panel.asr.perm.request')}
+              </button>
+            </div>
+            {(() => {
+              const micOk = perms.mic === 'authorized'
+              const micUnknown = perms.mic === 'notDetermined' || perms.mic === 'unknown'
+              const micColor = micOk ? SUCCESS : micUnknown ? CAPTION : DANGER
+              return (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: FS.xs }}>
+                    <span style={{ width: 8, height: 8, borderRadius: RADIUS_CHIP, background: micColor }} />
+                    <span>{t('panel.asr.perm.mic')}</span>
+                    <span style={{ flex: '1 1 auto' }} />
+                    <span style={{ color: micColor }}>{t(`panel.asr.perm.mic.${perms.mic}`)}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: FS.xs }}>
+                    <span style={{ width: 8, height: 8, borderRadius: RADIUS_CHIP, background: perms.screen ? SUCCESS : DANGER }} />
+                    <span>{t('panel.asr.perm.screen')}</span>
+                    <span style={{ flex: '1 1 auto' }} />
+                    <span style={{ color: perms.screen ? SUCCESS : DANGER }}>
+                      {perms.screen ? t('panel.asr.perm.granted') : t('panel.asr.perm.denied')}
+                    </span>
+                  </div>
+                </>
+              )
+            })()}
+            <div style={{ ...smallStyle, marginTop: 6, lineHeight: 1.5 }}>{t('panel.asr.perm.hint')}</div>
+          </div>
+        ) : null}
 
         <div style={{ ...cardStyle, marginTop: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

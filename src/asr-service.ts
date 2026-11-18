@@ -941,6 +941,39 @@ export class AsrRuntime {
     }
   }
 
+
+  /**
+   * 查询（可选请求）麦克风与屏幕录制权限。
+   * 屏幕录制的授权绑定在二进制签名上，所以面板要能随时看到当前真实状态。
+   */
+  async permissions(request = false): Promise<{ mic: 'authorized' | 'denied' | 'restricted' | 'notDetermined' | 'unknown'; screen: boolean; supported: boolean }> {
+    const helper = this.helperPath ?? path.join(this.home, 'bin', 'asr-helper')
+    if (!existsSync(helper)) return { mic: 'unknown', screen: false, supported: false }
+    return new Promise((resolve) => {
+      const child = spawn(helper, ['permissions', ...(request ? ['--request'] : [])], { stdio: ['ignore', 'pipe', 'pipe'] })
+      let out = ''
+      child.stdout?.setEncoding('utf8')
+      child.stdout?.on('data', (chunk: string) => { out += chunk })
+      const timer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* 已退出 */ } }, 40_000)
+      child.on('exit', () => {
+        clearTimeout(timer)
+        const line = out.split('\n').map((item) => item.trim()).filter(Boolean).pop() ?? ''
+        try {
+          const parsed = JSON.parse(line) as { mic?: string; screen?: boolean }
+          const mic = parsed.mic === 'authorized' || parsed.mic === 'denied' || parsed.mic === 'restricted' || parsed.mic === 'notDetermined'
+            ? parsed.mic : 'unknown'
+          resolve({ mic, screen: Boolean(parsed.screen), supported: true })
+        } catch {
+          resolve({ mic: 'unknown', screen: false, supported: false })
+        }
+      })
+      child.on('error', () => {
+        clearTimeout(timer)
+        resolve({ mic: 'unknown', screen: false, supported: false })
+      })
+    })
+  }
+
   private watchMemory(): void {
     if (this.memoryTimer) clearInterval(this.memoryTimer)
     const tick = (): void => {

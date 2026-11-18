@@ -528,6 +528,11 @@ async function dispatch(
         Number.isFinite(endSec) ? endSec : undefined,
       )
     }
+    case 'asr.permissions': {
+      const runtime = requireAsr(asr).runtime
+      // 传 request=true 会弹系统授权框（屏幕录制）
+      return runtime.permissions(payload.request === true)
+    }
     case 'asr.status':
       return requireAsr(asr).runtime.status()
     case 'asr.set': {

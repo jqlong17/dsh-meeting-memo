@@ -492,6 +492,38 @@ func exportAudioTrack(from url: URL) -> URL? {
     return nil
 }
 
+
+/**
+ * 查询（可选：请求）麦克风与屏幕录制权限。
+ *
+ * 屏幕录制的权限绑定在二进制签名上：换一次签名就失效一次，
+ * 所以面板要能把「现在到底有没有权限」直接显示出来。
+ */
+func runPermissions(request: Bool) -> Never {
+    var mic = "unknown"
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized: mic = "authorized"
+    case .denied: mic = "denied"
+    case .restricted: mic = "restricted"
+    case .notDetermined: mic = "notDetermined"
+    @unknown default: mic = "unknown"
+    }
+    if request, mic == "notDetermined" || mic == "denied" {
+        let semaphore = DispatchSemaphore(value: 0)
+        AVCaptureDevice.requestAccess(for: .audio) { _ in semaphore.signal() }
+        _ = semaphore.wait(timeout: .now() + 30)
+        mic = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized ? "authorized" : "denied"
+    }
+
+    var screen = CGPreflightScreenCaptureAccess()
+    if request, !screen {
+        // 会弹系统对话框；用户同意后通常需要重启应用才真正生效
+        screen = CGRequestScreenCaptureAccess()
+    }
+    emit(["type": "permissions", "mic": mic, "screen": screen])
+    exit(0)
+}
+
 func runTranscribeFile(path: String, modelDir: String, language: String) -> Never {
     let model = SenseVoice()
     do {
@@ -1041,6 +1073,10 @@ if command == "inputs" {
 }
 
 #if canImport(AppKit)
+if command == "permissions" {
+    runPermissions(request: CommandLine.arguments.contains("--request"))
+}
+
 if command == "pick" {
     runPick()
 }
@@ -1055,7 +1091,7 @@ if command == "transcribe" {
 }
 
 guard command == "capture" else {
-    fputs("usage: asr-helper capture --model DIR [--mode raw|tracks|merged] [--audio DIR] [--input UID]\n       asr-helper capture --engine external --audio DIR [--mode raw|tracks|merged]\n       asr-helper transcribe --file PATH --model DIR [--language zhen]\n       asr-helper pick\n       asr-helper inputs\n", stderr)
+    fputs("usage: asr-helper capture --model DIR [--mode raw|tracks|merged] [--audio DIR] [--input UID]\n       asr-helper capture --engine external --audio DIR [--mode raw|tracks|merged]\n       asr-helper transcribe --file PATH --model DIR [--language zhen]\n       asr-helper pick\n       asr-helper permissions [--request]\n       asr-helper inputs\n", stderr)
     exit(2)
 }
 
