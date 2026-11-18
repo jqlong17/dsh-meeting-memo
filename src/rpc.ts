@@ -82,10 +82,11 @@ function asRecord(value: unknown): Record<string, unknown> {
 async function dispatch(
   service: MeetingService,
   jobs: MinutesJobStore | undefined,
-  asr: { models: AsrModelRegistry; runtime: AsrRuntime; downloads?: ModelDownloads } | undefined,
+  asr: { models: AsrModelRegistry; runtime: AsrRuntime; downloads?: ModelDownloads; imports?: ImportService } | undefined,
   op: string,
   payload: Record<string, unknown>,
 ): unknown {
+  const imports = asr?.imports
   switch (op) {
     case 'day':
       return service.dayPayload(typeof payload.day === 'string' ? payload.day : undefined)
@@ -852,7 +853,6 @@ async function dispatch(
 }
 
 function modelPayload(asr: { models: AsrModelRegistry; downloads?: ModelDownloads }): Record<string, unknown> {
-  const imports = asr?.imports
   const listed = asr.models.list()
   return {
     ...listed,
