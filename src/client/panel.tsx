@@ -2083,6 +2083,9 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
   const total = Math.max(1, durationSec)
   const [drag, setDrag] = useState<{ anchor: number; current: number } | null>(null)
   const [hover, setHover] = useState<{ x: number; sec: number; speech: number } | null>(null)
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const dragAnchor = useRef(0)
+  const dragging = useRef(false)
 
   // 60 格密度：每格覆盖 total/60 秒
   const slot = total / 60
@@ -2099,6 +2102,44 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
   const xAt = (sec: number): number => (Math.min(total, Math.max(0, sec)) / total) * width
   const secAt = (px: number): number => (Math.min(width, Math.max(0, px)) / width) * total
   const yAt = (value: number): number => height - pad - (value / maxBin) * (height - pad * 2)
+  // 拖动用 window 级监听：SVG 上的 pointer capture 在 Electron 里容易丢事件，
+  // 表现就是「选了但框不跟着走」。
+  useEffect(() => {
+    if (!drag) return
+    const secFromEvent = (event: PointerEvent): number => {
+      const element = svgRef.current
+      if (!element) return dragAnchor.current
+      const rect = element.getBoundingClientRect()
+      const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+      return secAt(ratio * width)
+    }
+    const move = (event: PointerEvent): void => {
+      if (!dragging.current) return
+      setDrag({ anchor: dragAnchor.current, current: secFromEvent(event) })
+    }
+    const up = (event: PointerEvent): void => {
+      if (!dragging.current) return
+      dragging.current = false
+      const current = secFromEvent(event)
+      const from = Math.min(dragAnchor.current, current)
+      const to = Math.max(dragAnchor.current, current)
+      setDrag(null)
+      if (to - from < Math.max(0.5, total / 200)) {
+        onSelect({ start: from, end: total })
+        return
+      }
+      onSelect({ start: from, end: to })
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  }, [drag !== null]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ratio * total)
   const selLeft = xAt(Math.min(selection.start, selection.end))
   const selRight = xAt(Math.max(selection.start, selection.end))
@@ -2112,38 +2153,38 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
           height={height + 14}
           role="img"
           style={{ display: 'block', background: SURFACE_SOFT, borderRadius: RADIUS_CHIP, cursor: 'crosshair', touchAction: 'none' }}
+          ref={svgRef}
           onPointerDown={(event) => {
             if (!event.isPrimary) return
             const rect = event.currentTarget.getBoundingClientRect()
-            const sec = secAt(((event.clientX - rect.left) / rect.width) * width)
+            const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+            const sec = secAt(ratio * width)
+            dragAnchor.current = sec
+            dragging.current = true
             setDrag({ anchor: sec, current: sec })
-            event.currentTarget.setPointerCapture(event.pointerId)
           }}
           onPointerMove={(event) => {
+            if (dragging.current) return
             const rect = event.currentTarget.getBoundingClientRect()
             const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
             const sec = secAt(ratio * width)
-            if (drag) setDrag({ ...drag, current: sec })
             const bin = Math.min(59, Math.floor(sec / slot))
             setHover({ x: ratio * 100, sec, speech: bins[bin] ?? 0 })
           }}
-          onPointerUp={(event) => {
-            if (!drag) return
-            const from = Math.min(drag.anchor, drag.current)
-            const to = Math.max(drag.anchor, drag.current)
-            setDrag(null)
-            try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* 已释放 */ }
-            // 太短的框选当成单击：选到这一刻之后的一小段
-            if (to - from < Math.max(0.5, total / 200)) {
-              onSelect({ start: from, end: total })
-              return
-            }
-            onSelect({ start: from, end: to })
-          }}
-          onPointerCancel={() => setDrag(null)}
           onPointerLeave={() => setHover(null)}
         >
-          <rect x={selLeft} y={0} width={Math.max(0, selRight - selLeft)} height={height} fill={ACCENT} opacity={0.16} />
+          {drag ? (
+            <rect
+              x={xAt(Math.min(drag.anchor, drag.current))}
+              y={0}
+              width={Math.max(1, Math.abs(xAt(drag.current) - xAt(drag.anchor)))}
+              height={height}
+              fill={ACCENT}
+              opacity={0.22}
+            />
+          ) : (
+            <rect x={selLeft} y={0} width={Math.max(0, selRight - selLeft)} height={height} fill={ACCENT} opacity={0.16} />
+          )}
           {bins.map((value, index) => {
             if (value <= 0) return null
             const x = (index / 60) * width
@@ -2193,6 +2234,11 @@ function ImportTimeline({ snippets, durationSec, selection, onSelect, t }: {
       </div>
       <div style={{ ...smallStyle, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <span>{t('panel.import.selected')}</span>
+        {drag ? (
+          <span style={{ fontFamily: MONO, color: ACCENT }}>
+            {clock(Math.min(drag.anchor, drag.current))}–{clock(Math.max(drag.anchor, drag.current))}
+          </span>
+        ) : null}
         <ImportTimeInput
           value={selection.start}
           max={total}
