@@ -445,18 +445,28 @@ func downsample(_ buffer: AVAudioPCMBuffer, converter: AVAudioConverter, target:
 /// 浏览器里的 <input type=file> 只给 File 对象、拿不到真实路径，所以选择必须发生在宿主侧。
 func runPick() -> Never {
     let app = NSApplication.shared
-    app.setActivationPolicy(.accessory)
+    // .regular 才会真正激活应用；.accessory 弹出的面板常常收不到点击（表现为「点不进目录」）
+    app.setActivationPolicy(.regular)
     app.activate(ignoringOtherApps: true)
+
     let panel = NSOpenPanel()
     panel.allowsMultipleSelection = true
     panel.canChooseFiles = true
     panel.canChooseDirectories = false
+    panel.canCreateDirectories = false
+    panel.resolvesAliases = true
+    panel.treatsFilePackagesAsDirectories = true
+    // 不按类型过滤：过滤会把不认识的音频/视频变灰，用户会以为「选不了」。
+    // 真正的类型校验放在插件侧（读不了音轨会明确报错）。
+    panel.allowsOtherFileTypes = true
     panel.title = "选择音频或视频"
     panel.message = "可以一次选多个；视频会自动抽取音轨"
     panel.prompt = "导入"
-    if #available(macOS 11.0, *) {
-        panel.allowedContentTypes = [.audio, .movie, .mpeg4Movie, .quickTimeMovie]
-    }
+    panel.level = .modalPanel
+    panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+    panel.center()
+    app.activate(ignoringOtherApps: true)
+
     let response = panel.runModal()
     let paths = response == .OK ? panel.urls.map { $0.path } : []
     emit(["type": "picked", "paths": paths])
