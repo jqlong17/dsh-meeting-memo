@@ -2174,7 +2174,7 @@ function ImportTimeInput({ value, max, onCommit }: {
           <div style={{ ...cardStyle }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               <span style={{ fontSize: FS.sm, fontWeight: 600 }}>{importDetail.meta.name}</span>
-              <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2 }}>{clock(importDetail.meta.durationSec / 60)}</span>
+              <span style={{ fontFamily: MONO, fontSize: FS.xs, color: FG2 }}>{clockSec(importDetail.meta.durationSec)}</span>
               <span style={{ flex: '1 1 auto' }} />
               <button type="button" style={primaryButtonStyle} disabled={importGenerating || importDetail.snippets.length === 0} onClick={() => void generateImportMinutes()}>
                 {importGenerating ? t('panel.import.generating') : t('panel.import.generate')}
