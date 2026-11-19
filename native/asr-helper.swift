@@ -657,6 +657,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// 系统音最近一次收到样本的时间：SCK 在权限失效时会「启动成功但一个数据都没有」。
     var lastSystemBufferAt = Date()
     var systemStrikes = 0
+    /// 在线显示器签名：外接屏接入/合盖切换时用它发现变化
+    var displaySignature = ""
 
     init(model: SenseVoice?, mode: String, language: String, audioRoot: String?, inputUID: String?, embedModel: String?) {
         self.embedder = embedModel.flatMap { SpeakerEmbedder(model: $0) }
@@ -716,6 +718,23 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
      * 设备监视：耳机拔掉/插上、系统默认输入变了，都要立刻跟上。
      * 否则面板会一直显示已经不存在的设备名，采集仍在用旧设备。
      */
+    /// 当前在线显示器的签名（id 排序后拼接）。变化说明显示器拓扑变了。
+    func currentDisplaySignature() -> String {
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return "" }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return "" }
+        return ids.prefix(Int(count)).sorted().map(String.init).joined(separator: ",")
+    }
+
+    /// 重建系统音流（显示器拓扑变化后必须重建，否则流会绑在已下线的屏幕上）
+    func restartSystem() {
+        let old = stream
+        stream = nil
+        Task { try? await old?.stopCapture() }
+        startSystem()
+    }
+
     func watchDevices() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 5, repeating: 5)
@@ -755,6 +774,17 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
                 self.restartMic()
                 self.lastMicBufferAt = Date()
                 return
+            }
+            // 显示器拓扑变化（合盖、插拔外接屏）：重建系统音流
+            let signature = self.currentDisplaySignature()
+            if !signature.isEmpty, signature != self.displaySignature {
+                let first = self.displaySignature.isEmpty
+                self.displaySignature = signature
+                if !first {
+                    emit(["type": "warn", "track": "system", "message": "显示器配置变化，已重建系统声音采集"])
+                    self.restartSystem()
+                    return
+                }
             }
             let devices = inputDevices()
             let wanted = self.inputUID.flatMap { uid in devices.first { $0.uid == uid }?.id } ?? defaultInputID() ?? 0
@@ -861,7 +891,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
             Task {
                 do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = content.displays.first else {
+                // 合盖后内置屏会下线；优先选面积最大的在线屏，避免流绑在消失的屏幕上
+                guard let display = content.displays.max(by: { $0.width * $0.height < $1.width * $1.height }) else {
                     emit(["type": "error", "track": "system", "message": "没有可用的显示器，系统声音未开启"])
                     return
                 }
