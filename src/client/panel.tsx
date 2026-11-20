@@ -2215,6 +2215,8 @@ function ImportTimeInput({ value, max, onCommit }: {
       key: `import-${row.index}`,
       time: clock(row.startSec),
       text: row.text,
+      // 闭包里直接带上下标，不需要靠 key 反查（之前那样会白屏）
+      onSaveText: (next: string) => saveImportLine(row.index, next),
     }))
     return (
       <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
