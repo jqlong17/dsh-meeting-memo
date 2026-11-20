@@ -2216,17 +2216,6 @@ function ImportTimeInput({ value, max, onCommit }: {
       time: clock(row.startSec),
       text: row.text,
     }))
-    // 和「今日」同一套：双击正文改错字，保存后以改后文本为准
-    const importEdit = {
-      onSave: async (row: TranscriptRowView, next: string) => {
-        const hit = inRange.find((item) => `import-${item.index}` === row.key)
-        return hit ? saveImportLine(hit.index, next) : false
-      },
-      hint: t('panel.today.editHint'),
-      saveLabel: t('panel.today.saveLine'),
-      cancelLabel: t('panel.speaker.cancel'),
-      emptyLabel: t('panel.today.emptyLine'),
-    }
     return (
       <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
         {renderNotices()}
@@ -2389,7 +2378,7 @@ function ImportTimeInput({ value, max, onCommit }: {
               <div style={{ ...smallStyle, lineHeight: 1.6, marginTop: 6 }}>{t('panel.import.noRows')}</div>
             ) : (
               <div style={{ marginTop: 6, borderTop: `1px solid ${BORDER}` }}>
-                <TranscriptList rows={importRows} timeWidth={56} empty={t('panel.import.emptyRange')} edit={importEdit} />
+                <TranscriptList rows={importRows} timeWidth={56} empty={t('panel.import.emptyRange')} />
               </div>
             )}
             {importDetail.minutes ? (
