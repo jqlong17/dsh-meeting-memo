@@ -288,6 +288,8 @@ export function Panel(props: PanelProps) {
   const [openLabel, setOpenLabel] = useState<string | null>(null)
   const [labelLines, setLabelLines] = useState<Record<string, Array<{ line: number; startAt: string; track: string; text: string; speaker?: string }>>>({})
   const [linePicked, setLinePicked] = useState<number[]>([])
+  const [editingLine, setEditingLine] = useState<number | null>(null)
+  const [editingText, setEditingText] = useState('')
   const [editingLabel, setEditingLabel] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editNote, setEditNote] = useState('')
@@ -322,6 +324,24 @@ export function Panel(props: PanelProps) {
     setNotice(t('panel.speaker.labelUpdated'))
     void loadSpeaker()
     if (result.value.linesRenamed) void loadAssign(item.day)
+  }
+
+  /** 改某一句的正文：写入后重新拉当天数据，以改后的文本为准。 */
+  const saveLine = async (line: number, day: string) => {
+    const text = editingText.trim()
+    if (!text) {
+      setNoticeError(t('panel.today.emptyLine'))
+      return
+    }
+    const result = await rpc<{ line: number }>('transcript.update', { day, line, text })
+    if (!result.ok) {
+      setNoticeError(result.error.message)
+      return
+    }
+    setEditingLine(null)
+    setEditingText('')
+    setNotice(t('panel.today.lineSaved'))
+    await loadDayRef.current(day)
   }
 
   const removePickedLines = async (item: { id: string; day: string }) => {
@@ -1899,7 +1919,38 @@ export function Panel(props: PanelProps) {
                   {trackName(segment.track, t)}
                 </span>
                 <SpeakerChip name={spokeName} score={assigned?.score ?? segment.speakerScore} />
-                <span style={{ fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>{segment.text}</span>
+                {segment.line && editingLine === segment.line ? (
+                  <span style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                    <textarea
+                      style={{ ...inputStyle, flex: '1 1 auto', minHeight: 44, lineHeight: 1.5, resize: 'vertical' }}
+                      value={editingText}
+                      autoFocus
+                      onChange={(event) => setEditingText(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void saveLine(segment.line!, data?.day ?? '')
+                        if (event.key === 'Escape') { setEditingLine(null); setEditingText('') }
+                      }}
+                    />
+                    <button type="button" style={primaryButtonStyle} onClick={() => void saveLine(segment.line!, data?.day ?? '')}>
+                      {t('panel.today.saveLine')}
+                    </button>
+                    <button type="button" style={buttonStyle} onClick={() => { setEditingLine(null); setEditingText('') }}>
+                      {t('panel.speaker.cancel')}
+                    </button>
+                  </span>
+                ) : (
+                  <span
+                    style={{ fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word', cursor: segment.line ? 'text' : 'default' }}
+                    title={segment.line ? t('panel.today.editHint') : undefined}
+                    onDoubleClick={() => {
+                      if (!segment.line) return
+                      setEditingLine(segment.line)
+                      setEditingText(segment.text)
+                    }}
+                  >
+                    {segment.text}
+                  </span>
+                )}
               </div>
               )
             })}

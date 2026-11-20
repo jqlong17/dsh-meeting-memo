@@ -3,7 +3,7 @@
  * (`activity.jsonl` + `snippets.jsonl`) so the Today view can point here.
  */
 import { countSnippetLines, appendEmb } from './emb-store.ts'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 export type AsrMode = 'raw' | 'tracks' | 'merged'
@@ -66,6 +66,41 @@ function nextLineNumber(file: string): number {
 /** 供重算等场景重置计数（外部改写过文件时）。 */
 export function resetLineCount(file: string): void {
   lineCounts.delete(file)
+}
+
+
+/**
+ * 改某一行的正文，其它行原样保留。
+ *
+ * 行号是说话人归属、打标、声纹的对齐键，所以这里**只替换第 n 行的 text 字段**，
+ * 行数不变、顺序不变、其余字段全部保留。整文件先写临时文件再 rename，避免写坏。
+ */
+export function updateSnippetText(root: string, day: string, line: number, text: string): boolean {
+  const file = path.join(dayDir(root, day), 'snippets.jsonl')
+  if (!existsSync(file)) return false
+  const raw = readFileSync(file, 'utf8')
+  const lines = raw.split('\n')
+  // 末尾空行不占行号：按非空行计数
+  let index = 0
+  let target = -1
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!lines[i].trim()) continue
+    index += 1
+    if (index === line) { target = i; break }
+  }
+  if (target < 0) return false
+  let row: Record<string, unknown>
+  try {
+    row = JSON.parse(lines[target]) as Record<string, unknown>
+  } catch {
+    return false
+  }
+  row.text = text
+  lines[target] = JSON.stringify(row)
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`
+  writeFileSync(tmp, lines.join('\n'), 'utf8')
+  renameSync(tmp, file)
+  return true
 }
 
 export function appendSnippet(root: string, input: AsrSnippetInput): number {

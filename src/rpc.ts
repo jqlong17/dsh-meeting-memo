@@ -26,6 +26,7 @@ import type { AsrRuntime } from './asr-service.ts'
 import type { MinutesJobStore } from './jobs.ts'
 import { addLabel, deleteLabel, groupByDay, readLabels, removeLabelLine, removeLabelLines, updateLabel } from './speaker-labels.ts'
 import { readDayMap, listDays, writeDay } from './speaker-assignments.ts'
+import { asrLogRoot, updateSnippetText } from './asr-log.ts'
 import { readEmbMap } from './emb-store.ts'
 import { backfillLabel } from './speaker-backfill.ts'
 import { buildCentroids, decodeEmbedding } from './speaker-live.ts'
@@ -554,6 +555,17 @@ async function dispatch(
       if (wanted) return { day: wanted, map: readDayMap(service.config.home, wanted) }
       const days = Object.fromEntries(listDays(service.config.home).map((day) => [day, readDayMap(service.config.home, day)]))
       return { days }
+    }
+    case 'transcript.update': {
+      // 手动改某一句的正文：以改后的文本为准，行号/归属/声纹都不动
+      const day = service.dayPayload(typeof payload.day === 'string' && payload.day ? payload.day : undefined).day
+      const line = Number(payload.line)
+      const text = String(payload.text ?? '').trim()
+      if (!Number.isFinite(line) || line <= 0) throw new MeetingError('BAD_LINE', '行号不合法')
+      if (!text) throw new MeetingError('EMPTY_TEXT', '内容不能为空')
+      const ok = updateSnippetText(asrLogRoot(service.config.home), day, line, text)
+      if (!ok) throw new MeetingError('NO_LINE', '找不到这一行，可能数据已更新，刷新后再试')
+      return { day, line, text }
     }
     case 'speaker.rebuild': {
       const day = service.dayPayload(typeof payload.day === 'string' && payload.day ? payload.day : undefined).day
