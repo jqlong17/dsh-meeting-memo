@@ -27,23 +27,21 @@ export interface TranscriptRowView {
   /** 行首（勾选框）。 */
   leading?: ReactNode
   highlighted?: boolean
-  /**
-   * 传了就让这一行的正文可双击编辑。
-   * 用逐行闭包而不是按 key 反查：避免编辑态重渲染后对不上目标行（之前就是这么白屏的）。
-   */
-  onSaveText?: (next: string) => Promise<boolean>
 }
 
-const editHint = '双击可直接修改这句的正文（转写错了可以自己纠错）'
-const editSave = '保存这句'
-const editCancel = '取消'
-const editEmpty = '内容不能为空'
-
-export function TranscriptList({ rows, empty, timeWidth = 64 }: {
+export function TranscriptList({ rows, empty, timeWidth = 64, edit }: {
   rows: TranscriptRowView[]
   empty: ReactNode
   /** 时间列宽度，按 HH:mm:ss 或 m:ss 调整。 */
   timeWidth?: number
+  /** 传了就让正文可双击编辑；labels 用调用方的文案。 */
+  edit?: {
+    onSave: (row: TranscriptRowView, text: string) => Promise<boolean>
+    hint: string
+    saveLabel: string
+    cancelLabel: string
+    emptyLabel: string
+  }
 }): ReactElement {
   if (!rows.length) return <div style={{ fontSize: FS_XS, lineHeight: 1.6, color: CAPTION }}>{empty}</div>
   return (
@@ -64,14 +62,14 @@ export function TranscriptList({ rows, empty, timeWidth = 64 }: {
           {row.leading ?? null}
           <span style={{ fontFamily: MONO, fontSize: FS_XS, color: CAPTION, fontVariantNumeric: 'tabular-nums' }}>{row.time}</span>
           {row.before ?? null}
-          {row.onSaveText ? (
+          {edit ? (
             <EditableLine
               text={row.text}
-              onSave={row.onSaveText}
-              hint={editHint}
-              saveLabel={editSave}
-              cancelLabel={editCancel}
-              emptyLabel={editEmpty}
+              onSave={(next) => edit.onSave(row, next)}
+              hint={edit.hint}
+              saveLabel={edit.saveLabel}
+              cancelLabel={edit.cancelLabel}
+              emptyLabel={edit.emptyLabel}
             />
           ) : (
             <span style={{ fontSize: FS_SM, lineHeight: '18px', wordBreak: 'break-word' }}>{row.text}</span>
