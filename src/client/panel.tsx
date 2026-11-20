@@ -3304,9 +3304,38 @@ function ImportTimeInput({ value, max, onCommit }: {
                     {trackName(segment.track, t)}
                   </span>
                   <SpeakerChip name={spokeName} score={assigned?.score ?? segment.speakerScore} />
-                  <span style={{ minWidth: 0, fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word' }}>
-                    {segment.text}
-                  </span>
+                  {segment.line && editingLine === segment.line ? (
+                    <span style={{ display: 'flex', gap: 6, alignItems: 'flex-start', minWidth: 0 }}>
+                      <textarea
+                        style={{ ...inputStyle, flex: '1 1 auto', minHeight: 44, lineHeight: 1.5, resize: 'vertical' }}
+                        value={editingText}
+                        autoFocus
+                        onChange={(event) => setEditingText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void saveLine(segment.line!, data?.day ?? '')
+                          if (event.key === 'Escape') { setEditingLine(null); setEditingText('') }
+                        }}
+                      />
+                      <button type="button" style={primaryButtonStyle} onClick={() => void saveLine(segment.line!, data?.day ?? '')}>
+                        {t('panel.today.saveLine')}
+                      </button>
+                      <button type="button" style={buttonStyle} onClick={() => { setEditingLine(null); setEditingText('') }}>
+                        {t('panel.speaker.cancel')}
+                      </button>
+                    </span>
+                  ) : (
+                    <span
+                      style={{ minWidth: 0, fontSize: FS.sm, lineHeight: '18px', wordBreak: 'break-word', cursor: segment.line ? 'text' : 'default' }}
+                      title={segment.line ? t('panel.today.editHint') : undefined}
+                      onDoubleClick={() => {
+                        if (!segment.line) return
+                        setEditingLine(segment.line)
+                        setEditingText(segment.text)
+                      }}
+                    >
+                      {segment.text}
+                    </span>
+                  )}
                 </div>
                 )
               })}
