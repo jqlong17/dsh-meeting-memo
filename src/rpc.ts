@@ -507,6 +507,16 @@ async function dispatch(
       const result = imports.start(file)
       return { meta: result.meta, duplicated: result.duplicated }
     }
+    case 'imports.updateLine': {
+      if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
+      const id = String(payload.id || '')
+      const index = Number(payload.index)
+      const text = String(payload.text ?? '').trim()
+      if (!Number.isFinite(index) || index < 0) throw new MeetingError('BAD_LINE', '行号不合法')
+      if (!text) throw new MeetingError('EMPTY_TEXT', '内容不能为空')
+      if (!imports.updateLine(id, index, text)) throw new MeetingError('NO_LINE', '找不到这一句')
+      return { id, index, text }
+    }
     case 'imports.get': {
       if (!imports) throw new MeetingError('NO_IMPORT', '离线导入还没就绪')
       const id = String(payload.id || '')

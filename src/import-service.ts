@@ -25,6 +25,7 @@ import {
   patchMeta,
   readMeta,
   readMinutes,
+  updateSnippetText as updateImportText,
   readSnippets,
   writeMeta,
   writeMinutes,
@@ -328,6 +329,11 @@ export class ImportService {
   }
 
   /** 删除任务：挪进回收站，7 天后自动清理，不是立刻抹掉。 */
+  /** 改某一句的正文（下标从 0 开始），返回是否成功。 */
+  updateLine(id: string, index: number, text: string): boolean {
+    return updateImportText(this.home, id, index, text)
+  }
+
   remove(id: string): boolean {
     if (this.running.has(id)) throw new ImportError('RUNNING', '任务还在转写，先取消再删除')
     return trashImport(this.home, id) !== null

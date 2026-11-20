@@ -255,3 +255,30 @@ export function clock(sec: number): string {
   const pad = (value: number): string => String(value).padStart(2, '0')
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
 }
+
+/** 改导入任务里某一句的正文：整文件重写，其它行原样保留。 */
+export function updateSnippetText(home: string, id: string, index: number, text: string): boolean {
+  const file = snippetsFile(home, id)
+  if (!existsSync(file)) return false
+  const lines = readFileSync(file, 'utf8').split('\n')
+  let counter = -1
+  let target = -1
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!lines[i].trim()) continue
+    counter += 1
+    if (counter === index) { target = i; break }
+  }
+  if (target < 0) return false
+  let row: Record<string, unknown>
+  try {
+    row = JSON.parse(lines[target]) as Record<string, unknown>
+  } catch {
+    return false
+  }
+  row.text = text
+  lines[target] = JSON.stringify(row)
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`
+  writeFileSync(tmp, lines.join('\n'), 'utf8')
+  renameSync(tmp, file)
+  return true
+}

@@ -326,6 +326,19 @@ export function Panel(props: PanelProps) {
     if (result.value.linesRenamed) void loadAssign(item.day)
   }
 
+  /** 导入任务里改某一句（下标 0 起）。 */
+  const saveImportLine = async (index: number, text: string): Promise<boolean> => {
+    if (!importSel) return false
+    const result = await rpc('imports.updateLine', { id: importSel, index, text })
+    if (!result.ok) {
+      setNoticeError(result.error.message)
+      return false
+    }
+    setNotice(t('panel.today.lineSaved'))
+    await loadImportDetail(importSel, true)
+    return true
+  }
+
   /** 改某一句的正文：写入后重新拉当天数据，以改后的文本为准。 */
   const saveLine = async (line: number, day: string) => {
     const text = editingText.trim()
@@ -2198,11 +2211,22 @@ function ImportTimeInput({ value, max, onCommit }: {
       end: session.end * 60,
       ...(session.topic ? { label: session.topic } : {}),
     }))
-    const importRows: TranscriptRowView[] = inRange.map((row, index) => ({
-      key: `${row.startSec}-${index}`,
+    const importRows: TranscriptRowView[] = inRange.map((row) => ({
+      key: `import-${row.index}`,
       time: clock(row.startSec),
       text: row.text,
     }))
+    // 和「今日」同一套：双击正文改错字，保存后以改后文本为准
+    const importEdit = {
+      onSave: async (row: TranscriptRowView, next: string) => {
+        const hit = inRange.find((item) => `import-${item.index}` === row.key)
+        return hit ? saveImportLine(hit.index, next) : false
+      },
+      hint: t('panel.today.editHint'),
+      saveLabel: t('panel.today.saveLine'),
+      cancelLabel: t('panel.speaker.cancel'),
+      emptyLabel: t('panel.today.emptyLine'),
+    }
     return (
       <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', padding: 'var(--pl-pad)' }}>
         {renderNotices()}
@@ -2365,7 +2389,7 @@ function ImportTimeInput({ value, max, onCommit }: {
               <div style={{ ...smallStyle, lineHeight: 1.6, marginTop: 6 }}>{t('panel.import.noRows')}</div>
             ) : (
               <div style={{ marginTop: 6, borderTop: `1px solid ${BORDER}` }}>
-                <TranscriptList rows={importRows} timeWidth={56} empty={t('panel.import.emptyRange')} />
+                <TranscriptList rows={importRows} timeWidth={56} empty={t('panel.import.emptyRange')} edit={importEdit} />
               </div>
             )}
             {importDetail.minutes ? (
